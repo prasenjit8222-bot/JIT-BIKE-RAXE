@@ -310,7 +310,19 @@ export const RaceHud: React.FC<RaceHudProps> = ({
       {/* Race Start Countdown */}
       {phase === 'countdown' && (
         <div className="fixed inset-0 flex items-center justify-center">
-          <div className="rounded-2xl border border-white/15 bg-[#090d17]/90 px-10 py-6 text-center">
+          <div className="flex flex-col items-center rounded-2xl border border-white/15 bg-[#090d17]/90 px-10 py-6 text-center">
+            <div className="mb-2 flex items-center gap-2">
+              <div className="flex h-7 w-7 items-center justify-center overflow-hidden rounded-full border border-amber-400/70 bg-white p-0.5">
+                <img
+                  src="./assets/aistudio/image_74ce4eb9.png"
+                  alt="JIT BIKE RACE"
+                  className="h-full w-full rounded-full object-contain"
+                />
+              </div>
+              <span className="font-display text-xs font-bold tracking-wider text-white">
+                JIT BIKE RACE
+              </span>
+            </div>
             <div className="text-xs font-medium text-slate-400">Get Ready</div>
             <div className="font-display mt-1 text-6xl font-bold text-amber-400">
               {countdownValue > 0 ? countdownValue : 'GO!'}

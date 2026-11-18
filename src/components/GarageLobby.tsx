@@ -65,9 +65,18 @@ export const GarageLobby: React.FC<GarageLobbyProps> = ({
   return (
     <div className="pointer-events-none fixed inset-0 z-20 flex flex-col justify-between p-3 sm:p-5">
       {/* Top Bar: Clean 3-Zone Header */}
-      <header className="pointer-events-auto mx-auto flex w-full max-w-[1400px] items-center justify-between gap-4 rounded-xl border border-white/10 bg-[#0b101b]/90 px-4 py-2.5 sm:px-6">
-        <div className="font-display text-lg font-bold tracking-tight text-white whitespace-nowrap shrink-0 sm:text-xl">
-          APEX VELOCITY GP
+      <header className="pointer-events-auto mx-auto flex w-full max-w-[1400px] items-center justify-between gap-4 rounded-xl border border-white/10 bg-[#0b101b]/90 px-4 py-2 sm:px-6">
+        <div className="flex items-center gap-3 shrink-0">
+          <div className="flex h-10 w-10 items-center justify-center overflow-hidden rounded-full border-2 border-amber-400/75 bg-white p-0.5 shadow-md sm:h-11 sm:w-11 shrink-0">
+            <img
+              src="./assets/aistudio/image_74ce4eb9.png"
+              alt="JIT BIKE RACE Logo"
+              className="h-full w-full rounded-full object-contain"
+            />
+          </div>
+          <div className="font-display text-lg font-bold tracking-tight text-white whitespace-nowrap shrink-0 sm:text-xl">
+            JIT BIKE RACE
+          </div>
         </div>
 
         <div className="hidden items-center gap-3 text-xs text-slate-300 md:flex">

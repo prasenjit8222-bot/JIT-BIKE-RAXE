@@ -23,15 +23,26 @@ export const PodiumModal: React.FC<PodiumModalProps> = ({
     <div className="fixed inset-0 z-30 flex items-center justify-center bg-slate-950/70 p-4">
       <div className="w-full max-w-xl rounded-2xl border border-white/15 bg-[#0b101b] p-6 shadow-2xl">
         <div className="flex items-center justify-between gap-4 border-b border-white/10 pb-4">
-          <div>
-            <div className="text-xs font-medium text-amber-400">{track.name} · Official Results</div>
-            <h2 className="font-display mt-0.5 text-2xl font-bold text-white">
-              {localPlayer && localPlayer.rank <= 3
-                ? `Podium Finish — #${localPlayer.rank}`
-                : `Race Complete — #${localPlayer?.rank ?? 1}`}
-            </h2>
+          <div className="flex items-center gap-3">
+            <div className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-full border-2 border-amber-400/70 bg-white p-0.5 shadow-md">
+              <img
+                src="./assets/aistudio/image_74ce4eb9.png"
+                alt="JIT BIKE RACE Logo"
+                className="h-full w-full rounded-full object-contain"
+              />
+            </div>
+            <div>
+              <div className="text-xs font-semibold tracking-wide text-amber-400">
+                JIT BIKE RACE · {track.name} · Official Results
+              </div>
+              <h2 className="font-display mt-0.5 text-2xl font-bold text-white">
+                {localPlayer && localPlayer.rank <= 3
+                  ? `Podium Finish — #${localPlayer.rank}`
+                  : `Race Complete — #${localPlayer?.rank ?? 1}`}
+              </h2>
+            </div>
           </div>
-          <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-amber-500/15 text-amber-400">
+          <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-amber-500/15 text-amber-400">
             {localPlayer?.rank === 1 ? <Trophy className="h-6 w-6" /> : <Award className="h-6 w-6" />}
           </div>
         </div>
