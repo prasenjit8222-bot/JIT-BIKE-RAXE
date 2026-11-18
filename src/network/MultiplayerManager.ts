@@ -392,23 +392,30 @@ export class MultiplayerManager {
   }
 
   private startVad(stream: MediaStream): void {
-    const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
-    if (!AudioCtx) return;
+    try {
+      const AudioCtx =
+        window.AudioContext ||
+        (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+      if (!AudioCtx) return;
 
-    if (!this.vadCtx) {
-      this.vadCtx = new AudioCtx();
+      if (!this.vadCtx) {
+        this.vadCtx = new AudioCtx();
+      }
+      if (this.vadCtx.state === 'suspended') {
+        void this.vadCtx.resume().catch(() => {});
+      }
+
+      const src = this.vadCtx.createMediaStreamSource(stream);
+      const analyser = this.vadCtx.createAnalyser();
+      analyser.fftSize = 256;
+      src.connect(analyser);
+      this.vadAnalyser = analyser;
+    } catch {
+      return;
     }
-    if (this.vadCtx.state === 'suspended') {
-      void this.vadCtx.resume();
-    }
 
-    const src = this.vadCtx.createMediaStreamSource(stream);
-    const analyser = this.vadCtx.createAnalyser();
-    analyser.fftSize = 256;
-    src.connect(analyser);
-    this.vadAnalyser = analyser;
-
-    const data = new Uint8Array(analyser.frequencyBinCount);
+    if (!this.vadAnalyser) return;
+    const data = new Uint8Array(this.vadAnalyser.frequencyBinCount);
     if (this.vadTimer) window.clearInterval(this.vadTimer);
 
     this.vadTimer = window.setInterval(() => {
@@ -444,6 +451,7 @@ export class MultiplayerManager {
       if (!audio) {
         audio = document.createElement('audio');
         audio.autoplay = true;
+        audio.setAttribute('playsinline', 'true');
         this.remoteAudios.set(call.peer, audio);
       }
       audio.srcObject = remoteStream;

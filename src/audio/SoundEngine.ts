@@ -26,45 +26,54 @@ export class SoundEngine {
   private engineActive = false;
 
   public init(): void {
-    if (this.initialized) {
-      if (this.ctx && this.ctx.state === 'suspended') {
-        void this.ctx.resume();
+    try {
+      if (this.initialized) {
+        if (this.ctx && this.ctx.state === 'suspended') {
+          void this.ctx.resume().catch(() => {});
+        }
+        return;
       }
-      return;
+
+      const AudioCtx =
+        window.AudioContext ||
+        (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+      if (!AudioCtx) return;
+
+      const ctx = new AudioCtx();
+      this.ctx = ctx;
+      if (ctx.state === 'suspended') {
+        void ctx.resume().catch(() => {});
+      }
+
+      const master = ctx.createGain();
+      master.gain.value = this.muted ? 0 : 0.65;
+      master.connect(ctx.destination);
+      this.masterGain = master;
+
+      // Pre-generate 2 seconds of white/pinkish noise
+      const bufferSize = ctx.sampleRate * 2;
+      const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+      const data = buffer.getChannelData(0);
+      let b0 = 0;
+      let b1 = 0;
+      let b2 = 0;
+      for (let i = 0; i < bufferSize; i++) {
+        const white = Math.random() * 2 - 1;
+        b0 = 0.997 * b0 + white * 0.029;
+        b1 = 0.985 * b1 + white * 0.032;
+        b2 = 0.95 * b2 + white * 0.048;
+        data[i] = (b0 + b1 + b2 + white * 0.18) * 0.5;
+      }
+      this.noiseBuffer = buffer;
+
+      this.setupEngineSynth(ctx, master);
+      this.setupNitroSynth(ctx, master);
+      this.setupSirenSynth(ctx, master);
+
+      this.initialized = true;
+    } catch {
+      // Gracefully ignore blocked/unsupported Web Audio on restricted mobile WebViews
     }
-
-    const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
-    if (!AudioCtx) return;
-
-    const ctx = new AudioCtx();
-    this.ctx = ctx;
-
-    const master = ctx.createGain();
-    master.gain.value = this.muted ? 0 : 0.65;
-    master.connect(ctx.destination);
-    this.masterGain = master;
-
-    // Pre-generate 2 seconds of white/pinkish noise
-    const bufferSize = ctx.sampleRate * 2;
-    const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
-    const data = buffer.getChannelData(0);
-    let b0 = 0;
-    let b1 = 0;
-    let b2 = 0;
-    for (let i = 0; i < bufferSize; i++) {
-      const white = Math.random() * 2 - 1;
-      b0 = 0.997 * b0 + white * 0.029;
-      b1 = 0.985 * b1 + white * 0.032;
-      b2 = 0.95 * b2 + white * 0.048;
-      data[i] = (b0 + b1 + b2 + white * 0.18) * 0.5;
-    }
-    this.noiseBuffer = buffer;
-
-    this.setupEngineSynth(ctx, master);
-    this.setupNitroSynth(ctx, master);
-    this.setupSirenSynth(ctx, master);
-
-    this.initialized = true;
   }
 
   private setupEngineSynth(ctx: AudioContext, master: GainNode): void {

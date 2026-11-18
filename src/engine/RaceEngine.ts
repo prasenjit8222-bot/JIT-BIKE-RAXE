@@ -120,8 +120,11 @@ export class RaceEngine {
   private container: HTMLElement;
   private sound: SoundEngine;
   private isSoftwareGl = false;
+  private isMobile = false;
+  private autoAccelerate = false;
+  private initialized = false;
 
-  private renderer!: THREE.WebGLRenderer;
+  private renderer: THREE.WebGLRenderer | null = null;
   private scene!: THREE.Scene;
   private camera!: THREE.PerspectiveCamera;
   private sunLight!: THREE.DirectionalLight;
@@ -202,6 +205,7 @@ export class RaceEngine {
   public onRaceFinished?: (standings: RaceStanding[]) => void;
   public onNetworkSend?: (update: NetworkRacerUpdate) => void;
   public onContextLost?: (lost: boolean) => void;
+  public onInitFailed?: (reason: string) => void;
 
   private hudSyncAccum = 0;
   private netSyncAccum = 0;
@@ -211,45 +215,96 @@ export class RaceEngine {
   constructor(container: HTMLElement, sound: SoundEngine) {
     this.container = container;
     this.sound = sound;
-    this.initRenderer();
-    this.initScene();
-    this.setupGarage();
-    this.applyTrackAtmosphere('city', true);
+    this.isMobile =
+      typeof window !== 'undefined' &&
+      (window.matchMedia?.('(pointer: coarse)')?.matches ||
+        /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent));
+  }
+
+  private yieldFrame(ms = 16): Promise<void> {
+    return new Promise((resolve) => window.setTimeout(resolve, ms));
+  }
+
+  public async initializeAsync(onProgress: (pct: number, label: string) => void): Promise<void> {
+    if (this.disposed || this.initialized) return;
+
+    onProgress(15, 'Initializing 3D Graphics...');
+    await this.yieldFrame(16);
+    if (this.disposed) return;
+
+    const ok = this.initRenderer();
+    if (!ok || this.disposed) return;
+
+    onProgress(48, 'Generating Environment & Lighting...');
+    await this.yieldFrame(16);
+    if (this.disposed) return;
+
+    this.initSceneCore();
+
+    onProgress(78, 'Preparing Superbikes & Track Assets...');
+    await this.yieldFrame(16);
+    if (this.disposed) return;
+
+    this.initPoolsAndGarage();
+
+    onProgress(100, 'Ready to Race');
     this.bindEvents();
+    this.initialized = true;
     this.startLoop();
   }
 
-  private detectSoftwareGl(): boolean {
+  public setAutoAccelerate(enabled: boolean): void {
+    this.autoAccelerate = enabled;
+  }
+
+  private detectSoftwareGlFromRenderer(renderer: THREE.WebGLRenderer): boolean {
     try {
-      const probe = document.createElement('canvas');
-      const gl = probe.getContext('webgl2');
+      const gl = renderer.getContext();
       if (!gl) return true;
       const ext = gl.getExtension('WEBGL_debug_renderer_info');
       const param = ext ? ext.UNMASKED_RENDERER_WEBGL : gl.RENDERER;
-      const gpu = String(gl.getParameter(param));
-      gl.getExtension('WEBGL_lose_context')?.loseContext();
+      const gpu = String(gl.getParameter(param) || '');
       return /SwiftShader|llvmpipe|softpipe|Software|Basic Render/i.test(gpu);
     } catch {
-      return true;
+      return false;
     }
   }
 
-  private initRenderer(): void {
-    this.isSoftwareGl = this.detectSoftwareGl();
+  private initRenderer(): boolean {
+    let renderer: THREE.WebGLRenderer | null = null;
+    try {
+      renderer = new THREE.WebGLRenderer({
+        antialias: !this.isMobile,
+        powerPreference: this.isMobile ? 'default' : 'high-performance',
+        alpha: false,
+        stencil: false,
+      });
+    } catch {
+      try {
+        renderer = new THREE.WebGLRenderer({
+          antialias: false,
+          powerPreference: 'default',
+        });
+      } catch {
+        this.onInitFailed?.('WebGL 3D graphics could not be initialized on this device.');
+        return false;
+      }
+    }
 
-    const renderer = new THREE.WebGLRenderer({
-      antialias: !this.isSoftwareGl,
-      powerPreference: 'high-performance',
-    });
+    this.isSoftwareGl = this.detectSoftwareGlFromRenderer(renderer);
+
+    const w = Math.max(1, this.container.clientWidth || window.innerWidth);
+    const h = Math.max(1, this.container.clientHeight || window.innerHeight);
+
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
     renderer.toneMappingExposure = 1.1;
-    renderer.setPixelRatio(this.isSoftwareGl ? 1 : Math.min(window.devicePixelRatio, 1.5));
-    renderer.setSize(
-      this.container.clientWidth || window.innerWidth,
-      this.container.clientHeight || window.innerHeight
+    renderer.setPixelRatio(
+      this.isSoftwareGl ? 1 : Math.min(window.devicePixelRatio || 1, 1.5)
     );
+    renderer.setSize(w, h);
     renderer.shadowMap.enabled = false;
+    renderer.shadowMap.autoUpdate = false;
 
     renderer.domElement.style.display = 'block';
     renderer.domElement.style.width = '100%';
@@ -264,21 +319,28 @@ export class RaceEngine {
     renderer.domElement.addEventListener('webglcontextrestored', () => {
       this.onContextLost?.(false);
     });
+
+    return true;
   }
 
-  private initScene(): void {
+  private initSceneCore(): void {
     const scene = new THREE.Scene();
     this.scene = scene;
 
-    const aspect =
-      (this.container.clientWidth || window.innerWidth) /
-      (this.container.clientHeight || window.innerHeight);
-    this.camera = new THREE.PerspectiveCamera(65, aspect, 0.2, 650);
+    const w = Math.max(1, this.container.clientWidth || window.innerWidth);
+    const h = Math.max(1, this.container.clientHeight || window.innerHeight);
+    this.camera = new THREE.PerspectiveCamera(65, w / h, 0.2, 650);
 
-    const pmrem = new THREE.PMREMGenerator(this.renderer);
-    this.envMap = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
-    scene.environment = this.envMap;
-    pmrem.dispose();
+    if (this.renderer) {
+      try {
+        const pmrem = new THREE.PMREMGenerator(this.renderer);
+        this.envMap = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+        scene.environment = this.envMap;
+        pmrem.dispose();
+      } catch {
+        // Fallback smoothly without PMREM on restricted mobile GPUs
+      }
+    }
 
     // Gradient Sky Dome
     this.skyMat = new THREE.ShaderMaterial({
@@ -316,21 +378,27 @@ export class RaceEngine {
 
     this.sunLight = new THREE.DirectionalLight(0xffe8c2, 2.15);
     this.sunLight.position.set(28, 46, 18);
+    // Reduce shadow map resolution on mobile devices to preserve GPU memory
+    const shadowSize = this.isMobile ? 512 : 1024;
+    this.sunLight.shadow.mapSize.set(shadowSize, shadowSize);
     scene.add(this.sunLight);
     scene.add(this.sunLight.target);
 
-    const maxAniso = this.renderer.capabilities.getMaxAnisotropy();
+    const rawAniso = this.renderer ? this.renderer.capabilities.getMaxAnisotropy() : 1;
+    const maxAniso = this.isMobile ? Math.min(4, rawAniso) : rawAniso;
     this.contactShadowTex = createContactShadowTexture();
     this.facadeTex = createBuildingFacadeTexture(maxAniso);
     this.lampPoolTex = createLampPoolTexture();
     this.breakerTex = createSpeedBreakerTexture(maxAniso);
     this.finishTex = createFinishBannerTexture(maxAniso);
+  }
 
+  private initPoolsAndGarage(): void {
     // Pre-instantiate & warm Police Interceptor once at startup (zero mid-race lag!)
     this.policeRig = createTrafficVehicle('police', 0x0f172a, this.contactShadowTex);
     this.policeRig.root.visible = false;
     this.policeRig.root.position.set(0, -100, -200);
-    scene.add(this.policeRig.root);
+    this.scene.add(this.policeRig.root);
 
     // Pre-instantiate lightweight Spark Burst Pool (14 pooled additive spark particles)
     const sparkGeo = new THREE.BoxGeometry(0.11, 0.11, 0.24);
@@ -338,13 +406,16 @@ export class RaceEngine {
     for (let i = 0; i < 14; i++) {
       const mesh = new THREE.Mesh(sparkGeo, sparkMat);
       mesh.visible = false;
-      scene.add(mesh);
+      this.scene.add(mesh);
       this.sparkPool.push({ mesh, vx: 0, vy: 0, vz: 0, life: 0 });
     }
 
-    scene.add(this.garageGroup);
-    scene.add(this.raceGroup);
+    this.scene.add(this.garageGroup);
+    this.scene.add(this.raceGroup);
     this.raceGroup.visible = false;
+
+    this.setupGarage();
+    this.applyTrackAtmosphere(this.garageTrackId, true);
   }
 
   private setupGarage(): void {
@@ -375,13 +446,15 @@ export class RaceEngine {
     rimRing.position.y = 0.22;
     this.garageGroup.add(rimRing);
 
-    this.setGarageSelection('apex', 'city');
+    this.setGarageSelection(this.garageBikeId, this.garageTrackId);
   }
 
   public setGarageSelection(bikeId: BikeId, trackId: TrackId): void {
     const bikeChanged = !this.garageBikeRig || this.garageBikeId !== bikeId;
     this.garageBikeId = bikeId;
     this.garageTrackId = trackId;
+
+    if (!this.contactShadowTex || !this.scene) return;
 
     if (bikeChanged) {
       if (this.garageBikeRig) {
@@ -398,6 +471,7 @@ export class RaceEngine {
   }
 
   private applyTrackAtmosphere(trackId: TrackId, isGarage = false): void {
+    if (!this.scene || !this.skyDome) return;
     const spec = TRACKS[trackId];
     const grad = SKY_GRADIENTS[trackId];
     const fogHex = isGarage ? '#0b101d' : spec.fogColor;
@@ -416,6 +490,7 @@ export class RaceEngine {
   }
 
   public returnToGarage(): void {
+    if (!this.initialized) return;
     this.mode = 'garage';
     this.phase = 'lobby';
     this.sound.setEngineActive(false);
@@ -435,6 +510,7 @@ export class RaceEngine {
     remoteProvider: () => Map<string, NetworkRacerUpdate>,
     speakingProvider: (id: string) => boolean
   ): void {
+    if (!this.initialized) return;
     this.remoteUpdatesProvider = remoteProvider;
     this.speakingProvider = speakingProvider;
 
@@ -472,8 +548,12 @@ export class RaceEngine {
       this.skyDome.position.copy(this.camera.position);
     }
 
-    if (!this.isSoftwareGl) {
-      this.renderer.compile(this.scene, this.camera);
+    if (this.renderer && !this.isSoftwareGl && !this.isMobile) {
+      try {
+        this.renderer.compile(this.scene, this.camera);
+      } catch {
+        // Ignore shader compile errors on restricted drivers
+      }
     }
   }
 
@@ -504,7 +584,8 @@ export class RaceEngine {
 
   private buildRaceWorld(trackId: TrackId): void {
     const spec = TRACKS[trackId];
-    const maxAniso = this.renderer.capabilities.getMaxAnisotropy();
+    const rawAniso = this.renderer ? this.renderer.capabilities.getMaxAnisotropy() : 1;
+    const maxAniso = this.isMobile ? Math.min(4, rawAniso) : rawAniso;
 
     const roadTex = createRoadTexture(spec, maxAniso);
     const footpathTex = createFootpathTexture(spec, maxAniso);
@@ -843,22 +924,26 @@ export class RaceEngine {
 
   private bindEvents(): void {
     window.addEventListener('resize', this.handleResize);
+    window.addEventListener('orientationchange', this.handleResize);
+    window.visualViewport?.addEventListener('resize', this.handleResize);
   }
 
   private handleResize = (): void => {
-    if (this.disposed) return;
-    const w = this.container.clientWidth || window.innerWidth;
-    const h = this.container.clientHeight || window.innerHeight;
+    if (this.disposed || !this.renderer || !this.camera) return;
+    const w = Math.max(1, this.container.clientWidth || window.innerWidth);
+    const h = Math.max(1, this.container.clientHeight || window.innerHeight);
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
     this.renderer.setSize(w, h);
-    this.renderer.setPixelRatio(this.isSoftwareGl ? 1 : Math.min(window.devicePixelRatio, 1.5));
+    this.renderer.setPixelRatio(
+      this.isSoftwareGl ? 1 : Math.min(window.devicePixelRatio || 1, 1.5)
+    );
   };
 
   private startLoop(): void {
     this.lastTime = performance.now();
     const tick = () => {
-      if (this.disposed) return;
+      if (this.disposed || !this.renderer) return;
       const now = performance.now();
       const dt = Math.min((now - this.lastTime) / 1000, 0.05);
       this.lastTime = now;
@@ -881,8 +966,9 @@ export class RaceEngine {
   }
 
   private afterDraw(cb: () => void): void {
+    if (!this.renderer) return;
     const gl = this.renderer.getContext() as WebGL2RenderingContext;
-    if (!gl || !gl.fenceSync) {
+    if (!gl || typeof gl.fenceSync !== 'function') {
       this.frameId = window.setTimeout(cb, 80);
       return;
     }
@@ -1030,11 +1116,14 @@ export class RaceEngine {
       (spec.physics.maxSpeedMs + (r.isNitro ? spec.physics.nitroBonusMs : 0)) *
       (onFootpath ? 0.88 : 1.0);
 
-    if (this.inputs.accelerate || r.isNitro) {
+    const wantsThrottle =
+      this.inputs.accelerate || (this.autoAccelerate && !this.inputs.brake) || r.isNitro;
+
+    if (this.inputs.brake) {
+      r.speedMs -= 44 * dt;
+    } else if (wantsThrottle) {
       const boostFactor = r.isNitro ? 1.55 : 1.0;
       r.speedMs += spec.physics.accelMs2 * boostFactor * dt;
-    } else if (this.inputs.brake) {
-      r.speedMs -= 44 * dt;
     } else {
       r.speedMs -= (3.5 + r.speedMs * 0.08) * dt;
     }
@@ -1669,6 +1758,8 @@ export class RaceEngine {
     cancelAnimationFrame(this.frameId);
     window.clearTimeout(this.frameId);
     window.removeEventListener('resize', this.handleResize);
+    window.removeEventListener('orientationchange', this.handleResize);
+    window.visualViewport?.removeEventListener('resize', this.handleResize);
     this.clearRaceWorld();
     this.skyDome?.geometry.dispose();
     this.skyMat?.dispose();
@@ -1678,9 +1769,12 @@ export class RaceEngine {
     this.breakerTex?.dispose();
     this.finishTex?.dispose();
     this.envMap?.dispose();
-    this.renderer.dispose();
-    if (this.renderer.domElement.parentNode === this.container) {
-      this.container.removeChild(this.renderer.domElement);
+    if (this.renderer) {
+      this.renderer.dispose();
+      if (this.renderer.domElement.parentNode === this.container) {
+        this.container.removeChild(this.renderer.domElement);
+      }
+      this.renderer = null;
     }
   }
 }

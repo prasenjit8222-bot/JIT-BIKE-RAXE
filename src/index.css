@@ -8,14 +8,18 @@
   }
 
   html, body, #root {
-    width: 100%;
-    height: 100%;
+    width: 100vw;
+    height: 100vh;
+    height: 100dvh;
     margin: 0;
     padding: 0;
     overflow: hidden;
+    overscroll-behavior: none;
     font-family: var(--font-sans);
     background-color: #070a12;
     touch-action: none;
+    user-select: none;
+    -webkit-user-select: none;
   }
 }
 
@@ -28,7 +32,18 @@
   font-variant-numeric: tabular-nums;
 }
 
-/* Custom thin dark scrollbar for garage panels */
+.touch-control-btn {
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+
+/* Custom thin dark scrollbar for garage panels (allow smooth touch scroll on mobile) */
+.custom-scroll {
+  touch-action: pan-y;
+  -webkit-overflow-scrolling: touch;
+}
 .custom-scroll::-webkit-scrollbar {
   width: 5px;
 }
