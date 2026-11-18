@@ -1,0 +1,6 @@
+{
+  "name": "Apex Velocity GP",
+  "description": "High-speed 3D multiplayer superbike racing across City, Village, Forest, and Coastal circuits with WebRTC voice chat and procedural Web Audio.",
+  "requestFramePermissions": ["microphone"],
+  "majorCapabilities": []
+}
