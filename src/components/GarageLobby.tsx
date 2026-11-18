@@ -63,7 +63,10 @@ export const GarageLobby: React.FC<GarageLobbyProps> = ({
   const activeTrack = TRACK_LIST.find((t) => t.id === selectedTrack) ?? TRACK_LIST[0];
 
   return (
-    <div className="pointer-events-none fixed inset-0 z-20 flex flex-col justify-between p-3 sm:p-5">
+    <div
+      style={{ zIndex: 9999 }}
+      className="pointer-events-none fixed inset-0 flex flex-col justify-between p-3 sm:p-5"
+    >
       {/* Top Bar: Clean 3-Zone Header */}
       <header className="pointer-events-auto mx-auto flex w-full max-w-[1400px] items-center justify-between gap-4 rounded-xl border border-white/10 bg-[#0b101b]/90 px-4 py-2 sm:px-6">
         <div className="flex items-center gap-3 shrink-0">

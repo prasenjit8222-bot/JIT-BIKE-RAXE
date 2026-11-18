@@ -20,7 +20,10 @@ export const PodiumModal: React.FC<PodiumModalProps> = ({
   const track = TRACKS[trackId];
 
   return (
-    <div className="fixed inset-0 z-30 flex items-center justify-center bg-slate-950/70 p-4">
+    <div
+      style={{ zIndex: 9999 }}
+      className="pointer-events-auto fixed inset-0 flex items-center justify-center bg-slate-950/70 p-4"
+    >
       <div className="w-full max-w-xl rounded-2xl border border-white/15 bg-[#0b101b] p-6 shadow-2xl">
         <div className="flex items-center justify-between gap-4 border-b border-white/10 pb-4">
           <div className="flex items-center gap-3">

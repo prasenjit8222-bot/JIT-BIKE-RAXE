@@ -181,6 +181,7 @@ export class RaceEngine {
   private localRacer: RacerActor | null = null;
 
   // Controls & Camera (higher & further back MotoGP/arcade default chase angle)
+  private controlsRef: { current: ControlInputs } | null = null;
   private inputs: ControlInputs = {
     accelerate: false,
     brake: false,
@@ -257,6 +258,10 @@ export class RaceEngine {
     this.autoAccelerate = enabled;
   }
 
+  public setControlsRef(ref: { current: ControlInputs }): void {
+    this.controlsRef = ref;
+  }
+
   private detectSoftwareGlFromRenderer(renderer: THREE.WebGLRenderer): boolean {
     try {
       const gl = renderer.getContext();
@@ -309,6 +314,7 @@ export class RaceEngine {
     renderer.domElement.style.display = 'block';
     renderer.domElement.style.width = '100%';
     renderer.domElement.style.height = '100%';
+    renderer.domElement.style.pointerEvents = 'none';
     this.container.appendChild(renderer.domElement);
     this.renderer = renderer;
 
@@ -1104,8 +1110,10 @@ export class RaceEngine {
       return;
     }
 
+    const ctrl = this.controlsRef ? this.controlsRef.current : this.inputs;
+
     // Collectible Nitro ONLY (zero passive auto-regeneration!)
-    const wantsNitro = this.inputs.nitro && r.nitro > 1 && r.speedMs > 8;
+    const wantsNitro = ctrl.nitro && r.nitro > 1 && r.speedMs > 8;
     r.isNitro = wantsNitro;
     if (wantsNitro) {
       r.nitro = Math.max(0, r.nitro - 24 * dt);
@@ -1116,10 +1124,11 @@ export class RaceEngine {
       (spec.physics.maxSpeedMs + (r.isNitro ? spec.physics.nitroBonusMs : 0)) *
       (onFootpath ? 0.88 : 1.0);
 
+    // Strictly manual controls; optional toggleable auto-gas yields immediately on brake
     const wantsThrottle =
-      this.inputs.accelerate || (this.autoAccelerate && !this.inputs.brake) || r.isNitro;
+      ctrl.accelerate || (this.autoAccelerate && !ctrl.brake) || r.isNitro;
 
-    if (this.inputs.brake) {
+    if (ctrl.brake) {
       r.speedMs -= 44 * dt;
     } else if (wantsThrottle) {
       const boostFactor = r.isNitro ? 1.55 : 1.0;
@@ -1129,11 +1138,11 @@ export class RaceEngine {
     }
     r.speedMs = THREE.MathUtils.clamp(r.speedMs, -6, maxSpeed);
 
-    r.rig.brakeLightMat.emissiveIntensity = this.inputs.brake ? 4.5 : 1.5;
+    r.rig.brakeLightMat.emissiveIntensity = ctrl.brake ? 4.5 : 1.5;
 
     let steerDir = 0;
-    if (this.inputs.left) steerDir += 1;
-    if (this.inputs.right) steerDir -= 1;
+    if (ctrl.left) steerDir += 1;
+    if (ctrl.right) steerDir -= 1;
 
     const speedSteerFactor = Math.min(1, Math.abs(r.speedMs) / 14);
     const targetLatV = steerDir * spec.physics.steerSpeed * speedSteerFactor;
@@ -1153,7 +1162,7 @@ export class RaceEngine {
     const targetLean = -steerDir * 0.44 * speedSteerFactor;
     r.leanAngle = THREE.MathUtils.damp(r.leanAngle, targetLean, 9.0, dt);
 
-    const canWheelie = this.inputs.wheelie && r.speedMs > 10;
+    const canWheelie = ctrl.wheelie && r.speedMs > 10;
     r.isWheelie = canWheelie;
     const targetPitch = canWheelie ? 0.43 : 0;
     r.wheeliePitch = THREE.MathUtils.damp(r.wheeliePitch, targetPitch, 7.5, dt);

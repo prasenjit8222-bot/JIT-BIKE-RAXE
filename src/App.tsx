@@ -55,6 +55,26 @@ export default function App() {
   const [initError, setInitError] = useState<string | null>(null);
   const [showRotateHint, setShowRotateHint] = useState<boolean>(false);
 
+  const [autoGas, setAutoGas] = useState<boolean>(false);
+
+  const controlsRef = useRef<ControlInputs>({
+    accelerate: false,
+    brake: false,
+    left: false,
+    right: false,
+    nitro: false,
+    wheelie: false,
+  });
+
+  const resetControls = useCallback(() => {
+    controlsRef.current.accelerate = false;
+    controlsRef.current.brake = false;
+    controlsRef.current.left = false;
+    controlsRef.current.right = false;
+    controlsRef.current.nitro = false;
+    controlsRef.current.wheelie = false;
+  }, []);
+
   const [touchEnabled, setTouchEnabled] = useState<boolean>(() => {
     if (typeof window === 'undefined') return false;
     return (
@@ -125,11 +145,13 @@ export default function App() {
       }
 
       const activeSlots = net.getSlots();
+      resetControls();
       setStandings([]);
       setPhase('countdown');
       setCountdownValue(3);
 
-      engine.setAutoAccelerate(touchEnabled);
+      engine.setControlsRef(controlsRef);
+      engine.setAutoAccelerate(autoGas);
       engine.startRace(
         trackId,
         activeSlots,
@@ -160,7 +182,7 @@ export default function App() {
         }
       }, 850);
     },
-    [engineReady, enterFullscreenAndLandscape, touchEnabled]
+    [autoGas, engineReady, enterFullscreenAndLandscape, resetControls]
   );
 
   launchRaceRef.current = launchRace;
@@ -193,12 +215,14 @@ export default function App() {
 
     engine.onHudUpdate = (snapshot) => setHud(snapshot);
     engine.onRaceFinished = (finalStandings) => {
+      resetControls();
       setStandings(finalStandings);
       setPhase('finished');
     };
     engine.onNetworkSend = (update) => net.sendRacerUpdate(update);
     engine.onContextLost = (lost) => setContextLost(lost);
     engine.onInitFailed = (msg) => setInitError(msg);
+    engine.setControlsRef(controlsRef);
 
     net.setLocalProfile(playerName, selectedBike);
     net.connectRoom(roomCode, true);
@@ -210,7 +234,7 @@ export default function App() {
       })
       .then(() => {
         engine.setGarageSelection(selectedBike, selectedTrack);
-        engine.setAutoAccelerate(touchEnabled);
+        engine.setAutoAccelerate(autoGas);
         setEngineReady(true);
       });
 
@@ -263,44 +287,43 @@ export default function App() {
     engineRef.current?.setGarageSelection(selectedBike, selectedTrack);
   }, [playerName, selectedBike, selectedTrack]);
 
-  // Sync mobile auto-acceleration when touch mode toggles
+  // Sync optional toggleable Auto-Gas with engine
   useEffect(() => {
-    engineRef.current?.setAutoAccelerate(touchEnabled);
-  }, [touchEnabled, engineReady]);
+    engineRef.current?.setAutoAccelerate(autoGas);
+  }, [autoGas, engineReady]);
 
-  // Keyboard Controls during Race
+  // Keyboard Controls during Race (mutate controlsRef directly for zero stale closures)
   useEffect(() => {
     const updateKey = (code: string, down: boolean) => {
       const engine = engineRef.current;
-      if (!engine) return;
 
       switch (code) {
         case 'KeyW':
         case 'ArrowUp':
-          engine.setInputs({ accelerate: down });
+          controlsRef.current.accelerate = down;
           break;
         case 'KeyS':
         case 'ArrowDown':
-          engine.setInputs({ brake: down });
+          controlsRef.current.brake = down;
           break;
         case 'KeyA':
         case 'ArrowLeft':
-          engine.setInputs({ left: down });
+          controlsRef.current.left = down;
           break;
         case 'KeyD':
         case 'ArrowRight':
-          engine.setInputs({ right: down });
+          controlsRef.current.right = down;
           break;
         case 'ShiftLeft':
         case 'ShiftRight':
         case 'Space':
-          engine.setInputs({ nitro: down });
+          controlsRef.current.nitro = down;
           break;
         case 'KeyE':
-          engine.setInputs({ wheelie: down });
+          controlsRef.current.wheelie = down;
           break;
         case 'KeyC':
-          if (down && phase !== 'lobby') {
+          if (down && phase !== 'lobby' && engine) {
             setCameraMode(engine.cycleCamera());
           }
           break;
@@ -321,14 +344,7 @@ export default function App() {
     };
 
     const onBlur = () => {
-      engineRef.current?.setInputs({
-        accelerate: false,
-        brake: false,
-        left: false,
-        right: false,
-        nitro: false,
-        wheelie: false,
-      });
+      resetControls();
     };
 
     window.addEventListener('keydown', onKeyDown);
@@ -339,7 +355,7 @@ export default function App() {
       window.removeEventListener('keyup', onKeyUp);
       window.removeEventListener('blur', onBlur);
     };
-  }, [phase]);
+  }, [phase, resetControls]);
 
   const handleJoinRoom = (code: string, asHost: boolean) => {
     soundRef.current?.init();
@@ -383,15 +399,12 @@ export default function App() {
     setCameraMode(engineRef.current.cycleCamera());
   };
 
-  const handleTouchInput = (key: keyof ControlInputs, active: boolean) => {
-    engineRef.current?.setInputs({ [key]: active });
-  };
-
   const handleExitToGarage = () => {
     if (countdownTimerRef.current) {
       window.clearInterval(countdownTimerRef.current);
       countdownTimerRef.current = null;
     }
+    resetControls();
     try {
       if (document.fullscreenElement) {
         void document.exitFullscreen().catch(() => {});
@@ -408,8 +421,8 @@ export default function App() {
 
   return (
     <div className="relative h-screen h-dvh w-screen overflow-hidden bg-[#070a12]">
-      {/* Dedicated Isolated WebGL Canvas Container */}
-      <div ref={canvasMountRef} className="absolute inset-0 h-full w-full" />
+      {/* Dedicated Isolated WebGL Canvas Container (pointer-events-none so HUD never gets blocked) */}
+      <div ref={canvasMountRef} className="pointer-events-none absolute inset-0 h-full w-full" />
 
       {/* Lightweight Loading Progress Indicator before 3D Scene Starts */}
       {!engineReady && !initError && (
@@ -508,7 +521,9 @@ export default function App() {
           onToggleMasterAudio={handleToggleMasterAudio}
           touchEnabled={touchEnabled}
           onToggleTouch={() => setTouchEnabled((v) => !v)}
-          onTouchInput={handleTouchInput}
+          autoGas={autoGas}
+          onToggleAutoGas={() => setAutoGas((v) => !v)}
+          controlsRef={controlsRef}
           onExitRace={handleExitToGarage}
           showRotateHint={showRotateHint}
           onDismissRotateHint={() => setShowRotateHint(false)}

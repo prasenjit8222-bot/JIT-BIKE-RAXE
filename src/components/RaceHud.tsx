@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   Camera,
   ChevronLeft,
@@ -6,6 +6,7 @@ import {
   ChevronUp,
   Flame,
   Gamepad2,
+  Gauge,
   LogOut,
   Mic,
   MicOff,
@@ -34,7 +35,9 @@ interface RaceHudProps {
   onToggleMasterAudio: () => void;
   touchEnabled: boolean;
   onToggleTouch: () => void;
-  onTouchInput: (key: keyof ControlInputs, active: boolean) => void;
+  autoGas: boolean;
+  onToggleAutoGas: () => void;
+  controlsRef: React.MutableRefObject<ControlInputs>;
   onExitRace: () => void;
   showRotateHint: boolean;
   onDismissRotateHint: () => void;
@@ -57,7 +60,9 @@ export const RaceHud: React.FC<RaceHudProps> = ({
   onToggleMasterAudio,
   touchEnabled,
   onToggleTouch,
-  onTouchInput,
+  autoGas,
+  onToggleAutoGas,
+  controlsRef,
   onExitRace,
   showRotateHint,
   onDismissRotateHint,
@@ -75,8 +80,11 @@ export const RaceHud: React.FC<RaceHudProps> = ({
   const policeRedPhase = Math.floor((hud?.elapsedMs ?? 0) / 220) % 2 === 0;
 
   return (
-    <div className="pointer-events-none fixed inset-0 z-20 overflow-hidden select-none">
-      {/* Collision Red Screen Vignette */}
+    <div
+      style={{ zIndex: 9999 }}
+      className="pointer-events-none fixed inset-0 overflow-hidden select-none"
+    >
+      {/* Collision Red Screen Vignette (always pointer-events-none) */}
       {hud && hud.collisionFlash > 0.05 && (
         <div
           className="pointer-events-none fixed inset-0 border-8 border-rose-500/80 bg-rose-600/15"
@@ -84,7 +92,7 @@ export const RaceHud: React.FC<RaceHudProps> = ({
         />
       )}
 
-      {/* Nitro Pickup Cyan Screen-Edge Flash */}
+      {/* Nitro Pickup Cyan Screen-Edge Flash (always pointer-events-none) */}
       {hud && hud.nitroFlash > 0.05 && (
         <div
           className="pointer-events-none fixed inset-0 border-8 border-cyan-400/75 bg-cyan-500/15"
@@ -92,7 +100,7 @@ export const RaceHud: React.FC<RaceHudProps> = ({
         />
       )}
 
-      {/* Floating 3D-Projected Bike Name Tags */}
+      {/* Floating 3D-Projected Bike Name Tags (always pointer-events-none) */}
       {hud?.floatingTags.map((tag) => {
         if (!tag.visible) return null;
         const scale = Math.max(0.72, Math.min(1, 1 - tag.distance / 150));
@@ -115,10 +123,13 @@ export const RaceHud: React.FC<RaceHudProps> = ({
           MOBILE / TOUCH MODE HEADER HUD (Pinned cleanly at top: 10px)
          ============================================================ */}
       {touchEnabled ? (
-        <div className="pointer-events-none fixed inset-x-2.5 top-[10px] z-30 flex flex-col items-center gap-1.5 sm:inset-x-4">
-          <div className="pointer-events-auto flex w-full max-w-5xl flex-wrap items-center justify-between gap-x-3 gap-y-1.5 rounded-xl border border-white/12 bg-[#090d17]/82 px-3 py-1.5">
+        <div
+          style={{ zIndex: 9999 }}
+          className="pointer-events-none fixed inset-x-2.5 top-[10px] flex flex-col items-center gap-1.5 sm:inset-x-4"
+        >
+          <div className="pointer-events-auto flex w-full max-w-5xl flex-wrap items-center justify-between gap-x-2.5 gap-y-1.5 rounded-xl border border-white/12 bg-[#090d17]/84 px-3 py-1.5">
             {/* Rank, Time, Speed & Nitro */}
-            <div className="flex items-center gap-2.5">
+            <div className="flex items-center gap-2">
               <div className="flex items-baseline gap-1">
                 <span className="font-display text-base font-bold leading-none text-amber-400 sm:text-lg">
                   {rankLabel}
@@ -139,7 +150,7 @@ export const RaceHud: React.FC<RaceHudProps> = ({
 
               <div className="flex items-center gap-1.5">
                 <Flame className="h-3 w-3 text-cyan-300" />
-                <div className="h-1.5 w-12 overflow-hidden rounded-full bg-slate-800 sm:w-16">
+                <div className="h-1.5 w-10 overflow-hidden rounded-full bg-slate-800 sm:w-14">
                   <div
                     className={`h-full rounded-full ${
                       hud?.isNitroActive ? 'bg-amber-400' : 'bg-cyan-400'
@@ -158,7 +169,7 @@ export const RaceHud: React.FC<RaceHudProps> = ({
             </div>
 
             {/* Compact Horizontal Mini-Map inside Top Bar */}
-            <div className="order-3 flex w-full items-center gap-2 sm:order-2 sm:w-auto sm:min-w-[190px] sm:flex-1 sm:max-w-[260px]">
+            <div className="order-3 flex w-full items-center gap-2 sm:order-2 sm:w-auto sm:min-w-[170px] sm:flex-1 sm:max-w-[240px]">
               <span className="font-mono-num text-[10px] font-bold text-amber-400 whitespace-nowrap">
                 {progressPct}%
               </span>
@@ -197,8 +208,22 @@ export const RaceHud: React.FC<RaceHudProps> = ({
               </span>
             </div>
 
-            {/* Voice Chat, Camera, Touch & Exit Controls */}
+            {/* Auto-Gas Toggle, Camera, Voice Chat, Touch & Exit Controls */}
             <div className="order-2 flex items-center gap-1 sm:order-3">
+              <button
+                type="button"
+                onClick={onToggleAutoGas}
+                title="Toggle Optional Auto-Gas"
+                className={`flex h-8 items-center gap-1 rounded-lg border px-2 text-[10px] font-bold whitespace-nowrap cursor-pointer ${
+                  autoGas
+                    ? 'border-emerald-400/70 bg-emerald-500/25 text-emerald-200'
+                    : 'border-white/15 bg-slate-900/80 text-slate-300'
+                }`}
+              >
+                <Gauge className="h-3 w-3" />
+                <span>{autoGas ? 'Auto Gas' : 'Manual'}</span>
+              </button>
+
               <button
                 type="button"
                 onClick={onCycleCamera}
@@ -314,8 +339,22 @@ export const RaceHud: React.FC<RaceHudProps> = ({
               </div>
             </div>
 
-            {/* Top-Right: Camera, Voice Chat, Master Audio, Touch Toggle & Exit */}
+            {/* Top-Right: Auto-Gas Toggle, Camera, Voice Chat, Master Audio, Touch Toggle & Exit */}
             <div className="pointer-events-auto flex flex-wrap items-center justify-end gap-1.5">
+              <button
+                type="button"
+                onClick={onToggleAutoGas}
+                title="Toggle Optional Auto-Gas"
+                className={`flex h-9 items-center gap-1.5 rounded-lg border px-2.5 text-xs font-medium whitespace-nowrap cursor-pointer ${
+                  autoGas
+                    ? 'border-emerald-400/60 bg-emerald-500/20 text-emerald-200'
+                    : 'border-white/15 bg-[#090d17]/88 text-slate-300 hover:bg-slate-800'
+                }`}
+              >
+                <Gauge className="h-3.5 w-3.5" />
+                <span>{autoGas ? 'Auto Gas: On' : 'Manual Gas'}</span>
+              </button>
+
               <button
                 type="button"
                 onClick={onCycleCamera}
@@ -500,7 +539,7 @@ export const RaceHud: React.FC<RaceHudProps> = ({
       {hud?.police.active && (
         <div
           className={`mx-auto flex w-fit items-center gap-2.5 rounded-xl border border-rose-500/70 bg-[#1a0a10]/90 px-3.5 py-1.5 text-white ${
-            touchEnabled ? 'mt-[92px] sm:mt-[58px]' : 'mt-2'
+            touchEnabled ? 'mt-[96px] sm:mt-[58px]' : 'mt-2'
           }`}
         >
           <ShieldAlert className="h-4 w-4 text-rose-400 shrink-0" />
@@ -519,7 +558,7 @@ export const RaceHud: React.FC<RaceHudProps> = ({
       {hud?.police.escaped && !hud.police.active && (
         <div
           className={`mx-auto flex w-fit items-center gap-2 rounded-lg border border-emerald-500/50 bg-emerald-950/90 px-3.5 py-1 text-xs font-semibold text-emerald-200 ${
-            touchEnabled ? 'mt-[92px] sm:mt-[58px]' : 'mt-2'
+            touchEnabled ? 'mt-[96px] sm:mt-[58px]' : 'mt-2'
           }`}
         >
           Police Pursuit Evaded
@@ -528,7 +567,7 @@ export const RaceHud: React.FC<RaceHudProps> = ({
 
       {/* Race Start Countdown */}
       {phase === 'countdown' && (
-        <div className="fixed inset-0 flex items-center justify-center">
+        <div className="pointer-events-none fixed inset-0 flex items-center justify-center">
           <div className="flex flex-col items-center rounded-2xl border border-white/15 bg-[#090d17]/90 px-10 py-6 text-center">
             <div className="mb-2 flex items-center gap-2">
               <div className="flex h-7 w-7 items-center justify-center overflow-hidden rounded-full border border-amber-400/70 bg-white p-0.5">
@@ -551,47 +590,68 @@ export const RaceHud: React.FC<RaceHudProps> = ({
       )}
 
       {/* ============================================================
-          MOBILE TOUCH CONTROLS (Auto-Accelerate Active)
+          MOBILE TOUCH CONTROLS (Mutate controlsRef.current directly)
           Bottom-Left: LEFT / RIGHT Steering (bottom: 20px, left: 20px)
-          Bottom-Right: BRAKE / NITRO Action (bottom: 20px, right: 20px)
+          Bottom-Right: BRAKE, NITRO & GAS Action (bottom: 20px, right: 20px)
          ============================================================ */}
       {touchEnabled && phase === 'racing' && (
         <>
-          <div className="pointer-events-auto fixed bottom-[20px] left-[20px] z-30 flex items-center gap-3.5">
+          <div
+            style={{ zIndex: 9999 }}
+            className="pointer-events-auto fixed bottom-[20px] left-[20px] flex items-center gap-3.5"
+          >
             <TouchBtn
               label={<ChevronLeft className="h-8 w-8" />}
               ariaLabel="Steer Left"
               size="steer"
-              onChange={(active) => onTouchInput('left', active)}
+              controlKey="left"
+              controlsRef={controlsRef}
             />
             <TouchBtn
               label={<ChevronRight className="h-8 w-8" />}
               ariaLabel="Steer Right"
               size="steer"
-              onChange={(active) => onTouchInput('right', active)}
+              controlKey="right"
+              controlsRef={controlsRef}
             />
           </div>
 
-          <div className="pointer-events-auto fixed bottom-[20px] right-[20px] z-30 flex items-center gap-4 sm:gap-5">
+          <div
+            style={{ zIndex: 9999 }}
+            className="pointer-events-auto fixed bottom-[20px] right-[20px] flex items-end gap-4"
+          >
             <TouchBtn
               label="BRAKE"
               ariaLabel="Brake"
               accent="rose"
               size="action"
-              onChange={(active) => onTouchInput('brake', active)}
+              controlKey="brake"
+              controlsRef={controlsRef}
             />
-            <TouchBtn
-              label={
-                <span className="flex flex-col items-center leading-tight">
-                  <Flame className="h-5 w-5" />
-                  <span className="mt-0.5 text-[11px]">NITRO</span>
-                </span>
-              }
-              ariaLabel="Nitro Boost"
-              accent="amber"
-              size="action"
-              onChange={(active) => onTouchInput('nitro', active)}
-            />
+
+            <div className="flex flex-col items-end gap-3.5">
+              <TouchBtn
+                label={
+                  <span className="flex items-center gap-1 leading-tight">
+                    <Flame className="h-4 w-4" />
+                    <span className="text-[11px]">NITRO</span>
+                  </span>
+                }
+                ariaLabel="Nitro Boost"
+                accent="amber"
+                size="nitro"
+                controlKey="nitro"
+                controlsRef={controlsRef}
+              />
+              <TouchBtn
+                label={autoGas ? 'GAS (AUTO)' : 'GAS'}
+                ariaLabel="Accelerate"
+                accent="emerald"
+                size="action"
+                controlKey="accelerate"
+                controlsRef={controlsRef}
+              />
+            </div>
           </div>
         </>
       )}
@@ -602,9 +662,10 @@ export const RaceHud: React.FC<RaceHudProps> = ({
 interface TouchBtnProps {
   label: React.ReactNode;
   ariaLabel: string;
-  accent?: 'neutral' | 'amber' | 'rose';
-  size?: 'steer' | 'action';
-  onChange: (active: boolean) => void;
+  accent?: 'neutral' | 'amber' | 'rose' | 'emerald';
+  size?: 'steer' | 'action' | 'nitro';
+  controlKey: keyof ControlInputs;
+  controlsRef: React.MutableRefObject<ControlInputs>;
 }
 
 const TouchBtn: React.FC<TouchBtnProps> = ({
@@ -612,42 +673,45 @@ const TouchBtn: React.FC<TouchBtnProps> = ({
   ariaLabel,
   accent = 'neutral',
   size = 'steer',
-  onChange,
+  controlKey,
+  controlsRef,
 }) => {
   const [pressed, setPressed] = useState(false);
-  const pointerIdRef = useRef<number | null>(null);
 
+  // Only reset when button unmounts (never tied to changing callback closures!)
   useEffect(() => {
+    const ref = controlsRef;
+    const key = controlKey;
     return () => {
-      if (pointerIdRef.current !== null) {
-        onChange(false);
-      }
+      ref.current[key] = false;
     };
-  }, [onChange]);
+  }, [controlKey, controlsRef]);
 
   const colorMap: Record<NonNullable<TouchBtnProps['accent']>, string> = {
     neutral: pressed
       ? 'border-white bg-slate-700/95 text-white scale-95'
-      : 'border-white/30 bg-[#0b101b]/80 text-slate-100',
+      : 'border-white/30 bg-[#0b101b]/82 text-slate-100',
     amber: pressed
       ? 'border-amber-300 bg-amber-500 text-slate-950 scale-95'
-      : 'border-amber-400/60 bg-[#0b101b]/80 text-amber-300',
+      : 'border-amber-400/60 bg-[#0b101b]/82 text-amber-300',
     rose: pressed
       ? 'border-rose-300 bg-rose-500 text-white scale-95'
-      : 'border-rose-400/60 bg-[#0b101b]/80 text-rose-300',
+      : 'border-rose-400/60 bg-[#0b101b]/82 text-rose-300',
+    emerald: pressed
+      ? 'border-emerald-300 bg-emerald-500 text-slate-950 scale-95'
+      : 'border-emerald-400/60 bg-[#0b101b]/82 text-emerald-300',
   };
 
   const sizeClass =
     size === 'steer'
       ? 'h-16 w-16 sm:h-[72px] sm:w-[72px] rounded-2xl'
-      : 'h-16 min-w-[78px] px-4 sm:h-[72px] sm:min-w-[88px] rounded-2xl';
+      : size === 'nitro'
+        ? 'h-12 min-w-[78px] px-3 sm:h-14 sm:min-w-[88px] rounded-2xl'
+        : 'h-16 min-w-[78px] px-3 sm:h-[72px] sm:min-w-[88px] rounded-2xl';
 
-  const releasePointer = (e: React.PointerEvent<HTMLButtonElement>) => {
-    if (pointerIdRef.current === e.pointerId) {
-      pointerIdRef.current = null;
-      setPressed(false);
-      onChange(false);
-    }
+  const setActive = (active: boolean) => {
+    controlsRef.current[controlKey] = active;
+    setPressed(active);
   };
 
   return (
@@ -657,26 +721,30 @@ const TouchBtn: React.FC<TouchBtnProps> = ({
       onContextMenu={(e) => e.preventDefault()}
       onPointerDown={(e) => {
         e.preventDefault();
-        if (pointerIdRef.current !== null) return;
-        pointerIdRef.current = e.pointerId;
-        try {
-          e.currentTarget.setPointerCapture(e.pointerId);
-        } catch {
-          // ignore if capture unsupported
-        }
-        setPressed(true);
-        onChange(true);
+        setActive(true);
       }}
-      onPointerUp={releasePointer}
-      onPointerCancel={releasePointer}
-      onLostPointerCapture={releasePointer}
+      onPointerUp={(e) => {
+        e.preventDefault();
+        setActive(false);
+      }}
+      onPointerCancel={() => setActive(false)}
+      onPointerLeave={() => setActive(false)}
+      onTouchStart={(e) => {
+        e.stopPropagation();
+        setActive(true);
+      }}
+      onTouchEnd={(e) => {
+        e.stopPropagation();
+        setActive(false);
+      }}
+      onTouchCancel={() => setActive(false)}
       style={{
         touchAction: 'none',
         userSelect: 'none',
         WebkitUserSelect: 'none',
         WebkitTouchCallout: 'none',
       }}
-      className={`touch-control-btn flex items-center justify-center border-2 text-xs font-bold transition-transform ${sizeClass} ${colorMap[accent]}`}
+      className={`touch-control-btn pointer-events-auto flex items-center justify-center border-2 text-xs font-bold transition-transform cursor-pointer ${sizeClass} ${colorMap[accent]}`}
     >
       {label}
     </button>
