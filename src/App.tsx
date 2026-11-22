@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { SoundEngine } from './audio/SoundEngine';
 import { GarageLobby } from './components/GarageLobby';
+import { LoginModal } from './components/LoginModal';
 import { PodiumModal } from './components/PodiumModal';
+import { ProfileModal } from './components/ProfileModal';
 import { RaceHud } from './components/RaceHud';
 import { RaceEngine } from './engine/RaceEngine';
 import { MultiplayerManager } from './network/MultiplayerManager';
@@ -14,7 +16,15 @@ import {
   LobbySlot,
   RaceStanding,
   TrackId,
+  UserProfile,
 } from './types/game';
+import { DEFAULT_AVATAR } from './utils/avatars';
+import {
+  clearActiveSession,
+  loadActiveSession,
+  recordRaceResult,
+  saveProfile,
+} from './utils/profileStorage';
 
 export default function App() {
   const canvasMountRef = useRef<HTMLDivElement | null>(null);
@@ -23,13 +33,27 @@ export default function App() {
   const netRef = useRef<MultiplayerManager | null>(null);
   const countdownTimerRef = useRef<number | null>(null);
 
-  const [playerName, setPlayerName] = useState<string>(() => {
-    try {
-      return localStorage.getItem('av_gp_name') || 'Racer 01';
-    } catch {
-      return 'Racer 01';
-    }
+  const [savedSession, setSavedSession] = useState<UserProfile | null>(() => loadActiveSession());
+  const [profile, setProfile] = useState<UserProfile>(() => {
+    const existing = loadActiveSession();
+    if (existing) return existing;
+    return {
+      phone: null,
+      isGuest: true,
+      name: 'Racer 01',
+      avatar: DEFAULT_AVATAR,
+      coins: 500,
+      stats: { races: 0, wins: 0, podiums: 0, bestWheelie: 0 },
+      createdAt: Date.now(),
+    };
   });
+  const profileRef = useRef<UserProfile>(profile);
+  profileRef.current = profile;
+
+  const [showLoginModal, setShowLoginModal] = useState<boolean>(true);
+  const [showProfileModal, setShowProfileModal] = useState<boolean>(false);
+  const [lastCoinsEarned, setLastCoinsEarned] = useState<number>(0);
+
   const [selectedBike, setSelectedBike] = useState<BikeId>('apex');
   const [selectedTrack, setSelectedTrack] = useState<TrackId>('city');
   const [roomCode, setRoomCode] = useState<string>('GP101');
@@ -216,6 +240,19 @@ export default function App() {
     engine.onHudUpdate = (snapshot) => setHud(snapshot);
     engine.onRaceFinished = (finalStandings) => {
       resetControls();
+      const localResult = finalStandings.find((s) => s.isLocal);
+      if (localResult) {
+        const { updated, coinsEarned } = recordRaceResult(
+          profileRef.current,
+          localResult.rank,
+          localResult.wheelieScore
+        );
+        setProfile(updated);
+        setSavedSession(updated);
+        setLastCoinsEarned(coinsEarned);
+      } else {
+        setLastCoinsEarned(0);
+      }
       setStandings(finalStandings);
       setPhase('finished');
     };
@@ -224,7 +261,7 @@ export default function App() {
     engine.onInitFailed = (msg) => setInitError(msg);
     engine.setControlsRef(controlsRef);
 
-    net.setLocalProfile(playerName, selectedBike);
+    net.setLocalProfile(profileRef.current.name, selectedBike, profileRef.current.avatar);
     net.connectRoom(roomCode, true);
 
     void engine
@@ -276,16 +313,11 @@ export default function App() {
     };
   }, []);
 
-  // Sync Garage preview & Multiplayer profile on selection change
+  // Sync Garage preview & Multiplayer profile (name + bike + avatar) on selection change
   useEffect(() => {
-    try {
-      localStorage.setItem('av_gp_name', playerName);
-    } catch {
-      // ignore storage errors
-    }
-    netRef.current?.setLocalProfile(playerName, selectedBike);
+    netRef.current?.setLocalProfile(profile.name, selectedBike, profile.avatar);
     engineRef.current?.setGarageSelection(selectedBike, selectedTrack);
-  }, [playerName, selectedBike, selectedTrack]);
+  }, [profile.name, profile.avatar, selectedBike, selectedTrack]);
 
   // Sync optional toggleable Auto-Gas with engine
   useEffect(() => {
@@ -356,6 +388,43 @@ export default function App() {
       window.removeEventListener('blur', onBlur);
     };
   }, [phase, resetControls]);
+
+  const handleLoginComplete = (nextProfile: UserProfile) => {
+    soundRef.current?.init();
+    soundRef.current?.playUiClick();
+    setProfile(nextProfile);
+    setSavedSession(nextProfile);
+    setShowLoginModal(false);
+    netRef.current?.setLocalProfile(nextProfile.name, selectedBike, nextProfile.avatar);
+  };
+
+  const handleSaveProfile = (updated: UserProfile) => {
+    soundRef.current?.init();
+    soundRef.current?.playUiClick();
+    const persisted = saveProfile(updated);
+    setProfile(persisted);
+    setSavedSession(persisted);
+    netRef.current?.setLocalProfile(persisted.name, selectedBike, persisted.avatar);
+  };
+
+  const handleQuickNameChange = (nextName: string) => {
+    const clean = nextName.slice(0, 18);
+    const updated: UserProfile = { ...profile, name: clean };
+    setProfile(updated);
+    if (clean.trim().length > 0) {
+      const persisted = saveProfile(updated);
+      setSavedSession(persisted);
+    }
+  };
+
+  const handleLogout = () => {
+    soundRef.current?.init();
+    soundRef.current?.playUiClick();
+    clearActiveSession();
+    setSavedSession(null);
+    setShowProfileModal(false);
+    setShowLoginModal(true);
+  };
 
   const handleJoinRoom = (code: string, asHost: boolean) => {
     soundRef.current?.init();
@@ -483,8 +552,14 @@ export default function App() {
 
       {phase === 'lobby' && engineReady && (
         <GarageLobby
-          playerName={playerName}
-          onPlayerNameChange={setPlayerName}
+          profile={profile}
+          onOpenProfile={() => {
+            soundRef.current?.init();
+            soundRef.current?.playUiClick();
+            setShowProfileModal(true);
+          }}
+          playerName={profile.name}
+          onPlayerNameChange={handleQuickNameChange}
           selectedBike={selectedBike}
           onSelectBike={handleSelectBike}
           selectedTrack={selectedTrack}
@@ -534,8 +609,24 @@ export default function App() {
         <PodiumModal
           trackId={selectedTrack}
           standings={standings}
+          coinsEarned={lastCoinsEarned}
           onPlayAgain={() => launchRace(selectedTrack, true)}
           onChangeTrack={handleExitToGarage}
+        />
+      )}
+
+      {/* Startup Contact Number Login & New Racer Setup Modal */}
+      {engineReady && showLoginModal && phase === 'lobby' && (
+        <LoginModal savedSession={savedSession} onComplete={handleLoginComplete} />
+      )}
+
+      {/* My Profile Modal (Opened from Top-Left Profile Badge) */}
+      {engineReady && showProfileModal && !showLoginModal && phase === 'lobby' && (
+        <ProfileModal
+          profile={profile}
+          onSave={handleSaveProfile}
+          onLogout={handleLogout}
+          onClose={() => setShowProfileModal(false)}
         />
       )}
     </div>

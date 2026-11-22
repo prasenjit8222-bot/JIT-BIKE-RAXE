@@ -1,23 +1,40 @@
 import Peer, { DataConnection, MediaConnection } from 'peerjs';
 import { AI_RACER_PROFILES } from '../data/catalog';
-import { BikeId, LobbySlot, NetworkRacerUpdate, TrackId } from '../types/game';
+import {
+  BikeId,
+  GameMode,
+  LobbySlot,
+  NetworkRacerUpdate,
+  PaintColorId,
+  TrackId,
+  WeatherMode,
+} from '../types/game';
+import { DEFAULT_AVATAR, getAiAvatar } from '../utils/avatars';
 
 interface RoomMessage {
   type: 'join' | 'leave' | 'state' | 'start' | 'voice' | 'roster';
   senderId: string;
   name?: string;
+  avatar?: string;
   bikeId?: BikeId;
+  paintId?: PaintColorId;
+  underglow?: boolean;
   trackId?: TrackId;
+  gameMode?: GameMode;
+  weather?: WeatherMode;
   update?: NetworkRacerUpdate;
   isSpeaking?: boolean;
-  peers?: Array<{ id: string; name: string; bikeId: BikeId; isSpeaking: boolean }>;
+  peers?: Array<{ id: string; name: string; avatar: string; bikeId: BikeId; isSpeaking: boolean }>;
 }
 
 export class MultiplayerManager {
   private localId: string;
   private localName = 'Racer 01';
+  private localAvatar = DEFAULT_AVATAR;
   private localBike: BikeId = 'apex';
-  private roomCode = 'GP101';
+  private localPaint: PaintColorId = 'red';
+  private localUnderglow = false;
+  private roomCode = '1042';
   private isHost = true;
 
   private peer: Peer | null = null;
@@ -26,7 +43,19 @@ export class MultiplayerManager {
   private remoteAudios = new Map<string, HTMLAudioElement>();
   private channel: BroadcastChannel | null = null;
 
-  private remotePlayers = new Map<string, { id: string; name: string; bikeId: BikeId; isSpeaking: boolean; lastSeen: number }>();
+  private remotePlayers = new Map<
+    string,
+    {
+      id: string;
+      name: string;
+      avatar: string;
+      bikeId: BikeId;
+      paintId?: PaintColorId;
+      underglow?: boolean;
+      isSpeaking: boolean;
+      lastSeen: number;
+    }
+  >();
   private remoteUpdates = new Map<string, NetworkRacerUpdate>();
 
   // Voice chat state
@@ -40,7 +69,11 @@ export class MultiplayerManager {
 
   // Callbacks
   public onSlotsChanged?: (slots: LobbySlot[]) => void;
-  public onRemoteRaceStart?: (trackId: TrackId) => void;
+  public onRemoteRaceStart?: (
+    trackId: TrackId,
+    gameMode?: GameMode,
+    weather?: WeatherMode
+  ) => void;
   public onVoiceStateChanged?: (micOn: boolean, speakerMuted: boolean, isSpeaking: boolean, error?: string) => void;
   public onConnectionStatus?: (status: string) => void;
 
@@ -70,22 +103,46 @@ export class MultiplayerManager {
     return this.localSpeaking;
   }
 
-  public setLocalProfile(name: string, bikeId: BikeId): void {
+  public setLocalProfile(
+    name: string,
+    bikeId: BikeId,
+    avatar?: string,
+    paintId?: PaintColorId,
+    underglow?: boolean
+  ): void {
     this.localName = name.trim() || 'Racer 01';
     this.localBike = bikeId;
+    if (avatar) {
+      this.localAvatar = avatar;
+    }
+    if (paintId) {
+      this.localPaint = paintId;
+    }
+    if (typeof underglow === 'boolean') {
+      this.localUnderglow = underglow;
+    }
     this.broadcast({
       type: 'join',
       senderId: this.localId,
       name: this.localName,
+      avatar: this.localAvatar,
       bikeId: this.localBike,
+      paintId: this.localPaint,
+      underglow: this.localUnderglow,
     });
     this.emitSlots();
+  }
+
+  public createPrivateRoom(): string {
+    const code = String(Math.floor(1000 + Math.random() * 9000));
+    this.connectRoom(code, true);
+    return code;
   }
 
   public connectRoom(code: string, asHost: boolean): void {
     this.disconnectRoom();
 
-    const cleanCode = code.trim().toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8) || 'GP101';
+    const cleanCode = code.trim().toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8) || '1042';
     this.roomCode = cleanCode;
     this.isHost = asHost;
 
@@ -134,6 +191,7 @@ export class MultiplayerManager {
       type: 'join',
       senderId: this.localId,
       name: this.localName,
+      avatar: this.localAvatar,
       bikeId: this.localBike,
     });
 
@@ -142,6 +200,7 @@ export class MultiplayerManager {
         type: 'join',
         senderId: this.localId,
         name: this.localName,
+        avatar: this.localAvatar,
         bikeId: this.localBike,
       });
 
@@ -167,6 +226,7 @@ export class MultiplayerManager {
         type: 'join',
         senderId: this.localId,
         name: this.localName,
+        avatar: this.localAvatar,
         bikeId: this.localBike,
       } satisfies RoomMessage);
 
@@ -192,22 +252,36 @@ export class MultiplayerManager {
     if (!msg || msg.senderId === this.localId) return;
 
     if (msg.type === 'join') {
-      const existed = this.remotePlayers.has(msg.senderId);
+      const prev = this.remotePlayers.get(msg.senderId);
+      const nextName = msg.name || prev?.name || 'Remote Rider';
+      const nextAvatar = msg.avatar || prev?.avatar || DEFAULT_AVATAR;
+      const nextBike = msg.bikeId || prev?.bikeId || 'volt';
+      const profileChanged =
+        !prev || prev.name !== nextName || prev.avatar !== nextAvatar || prev.bikeId !== nextBike;
+
       this.remotePlayers.set(msg.senderId, {
         id: msg.senderId,
-        name: msg.name || 'Remote Rider',
-        bikeId: msg.bikeId || 'volt',
-        isSpeaking: this.remotePlayers.get(msg.senderId)?.isSpeaking ?? false,
+        name: nextName,
+        avatar: nextAvatar,
+        bikeId: nextBike,
+        paintId: msg.paintId ?? prev?.paintId,
+        underglow: msg.underglow ?? prev?.underglow,
+        isSpeaking: prev?.isSpeaking ?? false,
         lastSeen: Date.now(),
       });
-      if (!existed) {
+      if (!prev) {
         // Reply immediately so newcomer knows about us
         this.broadcast({
           type: 'join',
           senderId: this.localId,
           name: this.localName,
+          avatar: this.localAvatar,
           bikeId: this.localBike,
+          paintId: this.localPaint,
+          underglow: this.localUnderglow,
         });
+      }
+      if (profileChanged) {
         this.emitSlots();
       }
     } else if (msg.type === 'leave') {
@@ -216,6 +290,12 @@ export class MultiplayerManager {
       this.emitSlots();
     } else if (msg.type === 'state' && msg.update) {
       this.remoteUpdates.set(msg.senderId, msg.update);
+      const existing = this.remotePlayers.get(msg.senderId);
+      if (existing) {
+        existing.lastSeen = Date.now();
+        if (msg.update.name) existing.name = msg.update.name;
+        if (msg.update.avatar) existing.avatar = msg.update.avatar;
+      }
     } else if (msg.type === 'voice') {
       const p = this.remotePlayers.get(msg.senderId);
       if (p) {
@@ -223,7 +303,7 @@ export class MultiplayerManager {
         this.emitSlots();
       }
     } else if (msg.type === 'start' && msg.trackId) {
-      this.onRemoteRaceStart?.(msg.trackId);
+      this.onRemoteRaceStart?.(msg.trackId, msg.gameMode, msg.weather);
     }
   }
 
@@ -246,11 +326,13 @@ export class MultiplayerManager {
     }
   }
 
-  public sendRaceStart(trackId: TrackId): void {
+  public sendRaceStart(trackId: TrackId, gameMode: GameMode, weather: WeatherMode): void {
     this.broadcast({
       type: 'start',
       senderId: this.localId,
       trackId,
+      gameMode,
+      weather,
     });
   }
 
@@ -274,7 +356,10 @@ export class MultiplayerManager {
       slotIndex: 0,
       id: this.localId,
       name: this.localName,
+      avatar: this.localAvatar,
       bikeId: this.localBike,
+      paintId: this.localPaint,
+      underglow: this.localUnderglow,
       isLocal: true,
       isHuman: true,
       isAI: false,
@@ -288,7 +373,10 @@ export class MultiplayerManager {
         slotIndex: slots.length,
         id: remote.id,
         name: remote.name,
+        avatar: remote.avatar || DEFAULT_AVATAR,
         bikeId: remote.bikeId,
+        paintId: remote.paintId,
+        underglow: remote.underglow,
         isLocal: false,
         isHuman: true,
         isAI: false,
@@ -304,7 +392,10 @@ export class MultiplayerManager {
         slotIndex: slots.length,
         id: `ai_${aiIdx}`,
         name: profile.name,
+        avatar: getAiAvatar(aiIdx),
         bikeId: profile.bikeId,
+        paintId: profile.paintId,
+        underglow: false,
         isLocal: false,
         isHuman: false,
         isAI: true,

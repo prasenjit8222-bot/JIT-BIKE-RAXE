@@ -239,3 +239,140 @@ export function createContactShadowTexture(): THREE.CanvasTexture {
   tex.colorSpace = THREE.SRGBColorSpace;
   return tex;
 }
+
+export function createChevronSignTexture(dir: 'left' | 'right'): THREE.CanvasTexture {
+  const canvas = document.createElement('canvas');
+  canvas.width = 256;
+  canvas.height = 128;
+  const ctx = canvas.getContext('2d')!;
+
+  ctx.fillStyle = '#facc15';
+  ctx.fillRect(0, 0, 256, 128);
+
+  ctx.strokeStyle = '#090d17';
+  ctx.lineWidth = 10;
+  ctx.strokeRect(5, 5, 246, 118);
+
+  ctx.fillStyle = '#090d17';
+  const drawArrow = (cx: number) => {
+    ctx.beginPath();
+    if (dir === 'left') {
+      ctx.moveTo(cx + 34, 18);
+      ctx.lineTo(cx + 6, 18);
+      ctx.lineTo(cx - 30, 64);
+      ctx.lineTo(cx + 6, 110);
+      ctx.lineTo(cx + 34, 110);
+      ctx.lineTo(cx - 2, 64);
+    } else {
+      ctx.moveTo(cx - 34, 18);
+      ctx.lineTo(cx - 6, 18);
+      ctx.lineTo(cx + 30, 64);
+      ctx.lineTo(cx - 6, 110);
+      ctx.lineTo(cx - 34, 110);
+      ctx.lineTo(cx + 2, 64);
+    }
+    ctx.closePath();
+    ctx.fill();
+  };
+
+  drawArrow(86);
+  drawArrow(170);
+
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+
+export function createBoostPadTexture(maxAnisotropy: number): THREE.CanvasTexture {
+  const canvas = document.createElement('canvas');
+  canvas.width = 256;
+  canvas.height = 512;
+  const ctx = canvas.getContext('2d')!;
+
+  const bg = ctx.createLinearGradient(0, 0, 0, 512);
+  bg.addColorStop(0, '#0284c7');
+  bg.addColorStop(0.5, '#06b6d4');
+  bg.addColorStop(1, '#1d4ed8');
+  ctx.fillStyle = bg;
+  ctx.fillRect(0, 0, 256, 512);
+
+  ctx.strokeStyle = '#bae6fd';
+  ctx.lineWidth = 12;
+  ctx.strokeRect(6, 6, 244, 500);
+
+  // Triple glowing forward chevrons
+  ctx.fillStyle = '#e0f2fe';
+  for (let y = 75; y <= 385; y += 140) {
+    ctx.beginPath();
+    ctx.moveTo(128, y);
+    ctx.lineTo(222, y + 65);
+    ctx.lineTo(222, y + 105);
+    ctx.lineTo(128, y + 40);
+    ctx.lineTo(34, y + 105);
+    ctx.lineTo(34, y + 65);
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = maxAnisotropy;
+  return tex;
+}
+
+export function createRampTexture(maxAnisotropy: number): THREE.CanvasTexture {
+  const canvas = document.createElement('canvas');
+  canvas.width = 256;
+  canvas.height = 256;
+  const ctx = canvas.getContext('2d')!;
+
+  ctx.fillStyle = '#1e293b';
+  ctx.fillRect(0, 0, 256, 256);
+
+  ctx.fillStyle = '#f59e0b';
+  for (let y = 0; y < 256; y += 44) {
+    ctx.beginPath();
+    ctx.moveTo(128, y);
+    ctx.lineTo(232, y + 24);
+    ctx.lineTo(232, y + 36);
+    ctx.lineTo(128, y + 12);
+    ctx.lineTo(24, y + 36);
+    ctx.lineTo(24, y + 24);
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  ctx.fillStyle = '#fbbf24';
+  ctx.fillRect(0, 0, 14, 256);
+  ctx.fillRect(242, 0, 14, 256);
+
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = maxAnisotropy;
+  return tex;
+}
+
+export function createCheckpointBannerTexture(maxAnisotropy: number): THREE.CanvasTexture {
+  const canvas = document.createElement('canvas');
+  canvas.width = 512;
+  canvas.height = 128;
+  const ctx = canvas.getContext('2d')!;
+
+  ctx.fillStyle = '#0c4a6e';
+  ctx.fillRect(0, 0, 512, 128);
+
+  ctx.strokeStyle = '#38bdf8';
+  ctx.lineWidth = 8;
+  ctx.strokeRect(6, 6, 500, 116);
+
+  ctx.fillStyle = '#e0f2fe';
+  ctx.font = 'bold 42px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('CHECKPOINT', 256, 64);
+
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = maxAnisotropy;
+  return tex;
+}

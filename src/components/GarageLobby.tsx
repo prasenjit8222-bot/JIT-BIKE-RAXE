@@ -1,8 +1,10 @@
 import React from 'react';
 import {
   Check,
+  Coins,
   Mic,
   MicOff,
+  Pencil,
   Play,
   Radio,
   ShieldAlert,
@@ -11,9 +13,12 @@ import {
   VolumeX,
 } from 'lucide-react';
 import { BIKE_LIST, TRACK_LIST } from '../data/catalog';
-import { BikeId, LobbySlot, TrackId } from '../types/game';
+import { BikeId, LobbySlot, TrackId, UserProfile } from '../types/game';
+import { AvatarBadge } from './AvatarBadge';
 
 interface GarageLobbyProps {
+  profile: UserProfile;
+  onOpenProfile: () => void;
   playerName: string;
   onPlayerNameChange: (name: string) => void;
   selectedBike: BikeId;
@@ -36,6 +41,8 @@ interface GarageLobbyProps {
 }
 
 export const GarageLobby: React.FC<GarageLobbyProps> = ({
+  profile,
+  onOpenProfile,
   playerName,
   onPlayerNameChange,
   selectedBike,
@@ -67,22 +74,48 @@ export const GarageLobby: React.FC<GarageLobbyProps> = ({
       style={{ zIndex: 9999 }}
       className="pointer-events-none fixed inset-0 flex flex-col justify-between p-3 sm:p-5"
     >
-      {/* Top Bar: Clean 3-Zone Header */}
-      <header className="pointer-events-auto mx-auto flex w-full max-w-[1400px] items-center justify-between gap-4 rounded-xl border border-white/10 bg-[#0b101b]/90 px-4 py-2 sm:px-6">
-        <div className="flex items-center gap-3 shrink-0">
-          <div className="flex h-10 w-10 items-center justify-center overflow-hidden rounded-full border-2 border-amber-400/75 bg-white p-0.5 shadow-md sm:h-11 sm:w-11 shrink-0">
-            <img
-              src="./assets/aistudio/image_74ce4eb9.png"
-              alt="JIT BIKE RACE Logo"
-              className="h-full w-full rounded-full object-contain"
-            />
-          </div>
-          <div className="font-display text-lg font-bold tracking-tight text-white whitespace-nowrap shrink-0 sm:text-xl">
-            JIT BIKE RACE
+      {/* Top Bar: Profile Badge (Top-Left) + JIT Branding + Audio/Voice */}
+      <header className="pointer-events-auto mx-auto flex w-full max-w-[1400px] items-center justify-between gap-2.5 rounded-xl border border-white/10 bg-[#0b101b]/90 px-3 py-2 sm:gap-4 sm:px-5">
+        <div className="flex min-w-0 items-center gap-2.5 sm:gap-3.5">
+          {/* Top-Left Clickable Profile Badge */}
+          <button
+            type="button"
+            onClick={onOpenProfile}
+            title="Open My Profile"
+            className="flex items-center gap-2 rounded-lg border border-white/15 bg-slate-900/85 py-1 pl-1.5 pr-2.5 text-left transition-colors hover:border-amber-400/60 hover:bg-slate-800/90 shrink-0 cursor-pointer"
+          >
+            <AvatarBadge src={profile.avatar} name={profile.name} size="md" highlight />
+            <div className="min-w-0 max-w-[110px] sm:max-w-[145px]">
+              <div className="flex items-center gap-1">
+                <span className="truncate text-xs font-bold leading-tight text-white">
+                  {profile.name}
+                </span>
+                <Pencil className="h-2.5 w-2.5 shrink-0 text-slate-400" />
+              </div>
+              <div className="mt-0.5 flex items-center gap-1 text-[11px] font-semibold text-amber-300">
+                <Coins className="h-3 w-3 shrink-0" />
+                <span className="font-mono-num leading-none">{profile.coins}</span>
+              </div>
+            </div>
+          </button>
+
+          <div className="hidden h-7 w-px bg-white/10 sm:block" />
+
+          <div className="flex items-center gap-2.5 shrink-0">
+            <div className="flex h-9 w-9 items-center justify-center overflow-hidden rounded-full border-2 border-amber-400/75 bg-white p-0.5 shadow-md sm:h-10 sm:w-10 shrink-0">
+              <img
+                src="./assets/aistudio/image_74ce4eb9.png"
+                alt="JIT BIKE RACE Logo"
+                className="h-full w-full rounded-full object-contain"
+              />
+            </div>
+            <div className="hidden font-display text-base font-bold tracking-tight text-white whitespace-nowrap shrink-0 md:block lg:text-lg">
+              JIT BIKE RACE
+            </div>
           </div>
         </div>
 
-        <div className="hidden items-center gap-3 text-xs text-slate-300 md:flex">
+        <div className="hidden items-center gap-3 text-xs text-slate-300 xl:flex">
           <span>5-Player Online Grid</span>
           <span aria-hidden="true">·</span>
           <span>{activeTrack.name}</span>
@@ -160,9 +193,18 @@ export const GarageLobby: React.FC<GarageLobbyProps> = ({
           }`}
         >
           <div>
-            <label htmlFor="rider-name-input" className="block text-xs font-medium text-slate-400">
-              Rider Name
-            </label>
+            <div className="flex items-center justify-between">
+              <label htmlFor="rider-name-input" className="block text-xs font-medium text-slate-400">
+                Rider Name
+              </label>
+              <button
+                type="button"
+                onClick={onOpenProfile}
+                className="text-[11px] font-semibold text-amber-400 hover:text-amber-300 cursor-pointer"
+              >
+                Edit Photo &amp; Profile
+              </button>
+            </div>
             <input
               id="rider-name-input"
               type="text"
@@ -323,16 +365,26 @@ export const GarageLobby: React.FC<GarageLobbyProps> = ({
               <p className="mt-1.5 text-[11px] text-rose-300">{voiceError}</p>
             )}
 
-            <ul className="mt-2.5 space-y-1">
+            <ul className="mt-2.5 space-y-1.5">
               {slots.map((slot) => (
                 <li
                   key={slot.id}
-                  className="flex items-center justify-between rounded-md bg-slate-900/75 px-2.5 py-1.5 text-xs"
+                  className={`flex items-center justify-between rounded-lg px-2.5 py-1.5 text-xs ${
+                    slot.isLocal
+                      ? 'border border-amber-400/35 bg-amber-500/10'
+                      : 'bg-slate-900/75'
+                  }`}
                 >
                   <div className="flex min-w-0 items-center gap-2">
                     <span className="font-mono-num text-[11px] text-slate-400">
                       0{slot.slotIndex + 1}
                     </span>
+                    <AvatarBadge
+                      src={slot.avatar}
+                      name={slot.name}
+                      size="sm"
+                      highlight={slot.isLocal}
+                    />
                     <span className="truncate font-medium text-white">
                       {slot.name}
                     </span>
@@ -341,7 +393,9 @@ export const GarageLobby: React.FC<GarageLobbyProps> = ({
                     {slot.isSpeaking && (
                       <Radio className="h-3 w-3 text-emerald-400" />
                     )}
-                    <span>{slot.isLocal ? 'You' : slot.isHuman ? 'Online' : 'AI'}</span>
+                    <span className={slot.isLocal ? 'font-semibold text-amber-300' : ''}>
+                      {slot.isLocal ? 'You' : slot.isHuman ? 'Online' : 'AI'}
+                    </span>
                   </div>
                 </li>
               ))}

@@ -1,11 +1,13 @@
 import React from 'react';
-import { Award, RotateCcw, SlidersHorizontal, Trophy } from 'lucide-react';
+import { Award, Coins, RotateCcw, SlidersHorizontal, Trophy } from 'lucide-react';
 import { BIKES, TRACKS } from '../data/catalog';
 import { RaceStanding, TrackId } from '../types/game';
+import { AvatarBadge } from './AvatarBadge';
 
 interface PodiumModalProps {
   trackId: TrackId;
   standings: RaceStanding[];
+  coinsEarned?: number;
   onPlayAgain: () => void;
   onChangeTrack: () => void;
 }
@@ -13,18 +15,20 @@ interface PodiumModalProps {
 export const PodiumModal: React.FC<PodiumModalProps> = ({
   trackId,
   standings,
+  coinsEarned,
   onPlayAgain,
   onChangeTrack,
 }) => {
   const localPlayer = standings.find((s) => s.isLocal);
+  const winner = standings[0];
   const track = TRACKS[trackId];
 
   return (
     <div
       style={{ zIndex: 9999 }}
-      className="pointer-events-auto fixed inset-0 flex items-center justify-center bg-slate-950/70 p-4"
+      className="pointer-events-auto fixed inset-0 flex items-center justify-center bg-slate-950/70 p-4 overflow-y-auto"
     >
-      <div className="w-full max-w-xl rounded-2xl border border-white/15 bg-[#0b101b] p-6 shadow-2xl">
+      <div className="my-auto w-full max-w-xl rounded-2xl border border-white/15 bg-[#0b101b] p-5 shadow-2xl sm:p-6">
         <div className="flex items-center justify-between gap-4 border-b border-white/10 pb-4">
           <div className="flex items-center gap-3">
             <div className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-full border-2 border-amber-400/70 bg-white p-0.5 shadow-md">
@@ -38,7 +42,7 @@ export const PodiumModal: React.FC<PodiumModalProps> = ({
               <div className="text-xs font-semibold tracking-wide text-amber-400">
                 JIT BIKE RACE · {track.name} · Official Results
               </div>
-              <h2 className="font-display mt-0.5 text-2xl font-bold text-white">
+              <h2 className="font-display mt-0.5 text-xl font-bold text-white sm:text-2xl">
                 {localPlayer && localPlayer.rank <= 3
                   ? `Podium Finish — #${localPlayer.rank}`
                   : `Race Complete — #${localPlayer?.rank ?? 1}`}
@@ -49,6 +53,40 @@ export const PodiumModal: React.FC<PodiumModalProps> = ({
             {localPlayer?.rank === 1 ? <Trophy className="h-6 w-6" /> : <Award className="h-6 w-6" />}
           </div>
         </div>
+
+        {/* Winner Showcase & Reward Strip */}
+        {winner && (
+          <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-400/30 bg-amber-500/10 px-4 py-3">
+            <div className="flex min-w-0 items-center gap-3">
+              <AvatarBadge src={winner.avatar} name={winner.name} size="lg" highlight />
+              <div className="min-w-0">
+                <div className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-amber-300">
+                  <Trophy className="h-3.5 w-3.5" />
+                  <span>Race Winner</span>
+                </div>
+                <div className="font-display truncate text-base font-bold text-white">
+                  {winner.name}
+                  {winner.isLocal && (
+                    <span className="ml-1.5 text-xs font-normal text-amber-300">(You)</span>
+                  )}
+                </div>
+                <div className="text-[11px] text-slate-300">
+                  {BIKES[winner.bikeId].name} ·{' '}
+                  <span className="font-mono-num text-white">
+                    {formatMs(winner.finishTimeMs ?? 0)}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {typeof coinsEarned === 'number' && coinsEarned > 0 && (
+              <div className="flex items-center gap-1.5 rounded-lg border border-amber-400/40 bg-[#0b101b]/80 px-3 py-1.5 text-xs font-bold text-amber-300">
+                <Coins className="h-4 w-4" />
+                <span className="font-mono-num">+{coinsEarned} Coins</span>
+              </div>
+            )}
+          </div>
+        )}
 
         {/* 1st - 5th Standings Table */}
         <div className="mt-4 overflow-hidden rounded-xl border border-white/10 bg-slate-900/60">
@@ -72,10 +110,20 @@ export const PodiumModal: React.FC<PodiumModalProps> = ({
                     #{row.rank}
                   </td>
                   <td className="px-3.5 py-2.5">
-                    {row.name}
-                    {row.isLocal && (
-                      <span className="ml-1.5 text-[11px] font-normal text-amber-300">(You)</span>
-                    )}
+                    <div className="flex items-center gap-2">
+                      <AvatarBadge
+                        src={row.avatar}
+                        name={row.name}
+                        size="sm"
+                        highlight={row.isLocal || row.rank === 1}
+                      />
+                      <span className="truncate">
+                        {row.name}
+                        {row.isLocal && (
+                          <span className="ml-1.5 text-[11px] font-normal text-amber-300">(You)</span>
+                        )}
+                      </span>
+                    </div>
                   </td>
                   <td className="hidden px-3.5 py-2.5 text-slate-400 sm:table-cell">
                     {BIKES[row.bikeId].name}
@@ -92,7 +140,7 @@ export const PodiumModal: React.FC<PodiumModalProps> = ({
           </table>
         </div>
 
-        <div className="mt-6 flex flex-wrap items-center justify-end gap-3">
+        <div className="mt-5 flex flex-wrap items-center justify-end gap-3">
           <button
             type="button"
             onClick={onChangeTrack}

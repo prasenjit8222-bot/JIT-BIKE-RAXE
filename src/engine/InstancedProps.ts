@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { TrackId } from '../types/game';
-import { getTrackCenterX, getTrackYaw } from './TrackMath';
+import { getTrackCenterX, getTrackElevationY, getTrackYaw } from './TrackMath';
 
 const _mat4 = new THREE.Matrix4();
 const _pos = new THREE.Vector3();
@@ -28,17 +28,22 @@ interface InstancedLayer {
 
 export class InstancedPropPool {
   public readonly group = new THREE.Group();
+  private trackId: TrackId;
   private layers: InstancedLayer[][] = [];
   private records: PropRecord[][] = [];
-  private spanZ = 600;
+  private lampLightMat: THREE.MeshBasicMaterial | null = null;
+  private lampPoolMat: THREE.MeshBasicMaterial | null = null;
+  private spanZ = 560;
 
   constructor(
     trackId: TrackId,
     facadeTex: THREE.Texture,
     lampPoolTex: THREE.Texture
   ) {
+    this.trackId = trackId;
+
     if (trackId === 'city') {
-      this.buildCityProps(facadeTex, lampPoolTex);
+      this.buildCityProps(facadeTex);
     } else if (trackId === 'village') {
       this.buildVillageProps();
     } else if (trackId === 'forest') {
@@ -46,6 +51,9 @@ export class InstancedPropPool {
     } else {
       this.buildCoastalProps();
     }
+
+    // Illuminated roadside streetlamps across ALL 4 tracks (glow intensely in Night Mode!)
+    this.buildStreetLamps(lampPoolTex);
   }
 
   private createLayer(
@@ -58,14 +66,77 @@ export class InstancedPropPool {
     scaleYWithProp = true
   ): InstancedLayer {
     const mesh = new THREE.InstancedMesh(geo, mat, count);
-    mesh.frustumCulled = false; // instances dynamically recycle along the 2.6km track
+    mesh.frustumCulled = false; // instances dynamically recycle along curved/elevated tracks
     mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     this.group.add(mesh);
     return { mesh, localOffset, localRotY, scaleWithProp, scaleYWithProp };
   }
 
-  private buildCityProps(facadeTex: THREE.Texture, lampPoolTex: THREE.Texture): void {
-    // Group 0: Architectural Skyscrapers (24 pooled instances -> 3 draw calls total)
+  private buildStreetLamps(lampPoolTex: THREE.Texture): void {
+    const lCount = 18;
+    const poleMat = new THREE.MeshStandardMaterial({
+      color: 0x475569,
+      metalness: 0.78,
+      roughness: 0.34,
+    });
+    const lampMat = new THREE.MeshBasicMaterial({ color: 0xfef3c7 });
+    const poolMat = new THREE.MeshBasicMaterial({
+      map: lampPoolTex,
+      transparent: true,
+      opacity: this.trackId === 'city' ? 0.42 : 0.08,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+    });
+    this.lampLightMat = lampMat;
+    this.lampPoolMat = poolMat;
+
+    const poleGeo = new THREE.CylinderGeometry(0.09, 0.14, 6.4, 6);
+    poleGeo.translate(0, 3.2, 0);
+    const armGeo = new THREE.BoxGeometry(2.6, 0.1, 0.1);
+    armGeo.translate(1.15, 6.25, 0);
+    const lampGeo = new THREE.BoxGeometry(0.68, 0.15, 0.3);
+    lampGeo.translate(2.2, 6.18, 0);
+    const poolGeo = new THREE.PlaneGeometry(10.5, 10.5);
+    poolGeo.rotateX(-Math.PI / 2);
+    poolGeo.translate(2.2, 0.06, 0);
+
+    const lLayers: InstancedLayer[] = [
+      this.createLayer(poleGeo, poleMat, lCount, new THREE.Vector3(), 0, false),
+      this.createLayer(armGeo, poleMat, lCount, new THREE.Vector3(), 0, false),
+      this.createLayer(lampGeo, lampMat, lCount, new THREE.Vector3(), 0, false),
+      this.createLayer(poolGeo, poolMat, lCount, new THREE.Vector3(), 0, false),
+    ];
+
+    const lRecords: PropRecord[] = [];
+    for (let i = 0; i < lCount; i++) {
+      const side = i % 2 === 0 ? -1 : 1;
+      lRecords.push({
+        z: -10 + i * (this.spanZ / lCount),
+        lateralOffset: side * 9.2,
+        yawOffset: side === -1 ? 0 : Math.PI,
+        sx: 1,
+        sy: 1,
+        sz: 1,
+        side,
+      });
+    }
+    this.layers.push(lLayers);
+    this.records.push(lRecords);
+  }
+
+  public setNightIntensity(nightFactor: number): void {
+    const f = THREE.MathUtils.clamp(nightFactor, 0, 1);
+    if (this.lampLightMat) {
+      this.lampLightMat.color.setHex(f > 0.35 ? 0xfff7cc : 0x94a3b8);
+    }
+    if (this.lampPoolMat) {
+      const base = this.trackId === 'city' ? 0.25 : 0.0;
+      this.lampPoolMat.opacity = base + f * 0.85;
+      this.lampPoolMat.visible = this.lampPoolMat.opacity > 0.04;
+    }
+  }
+
+  private buildCityProps(facadeTex: THREE.Texture): void {
     const bCount = 24;
     const bodyMat = new THREE.MeshStandardMaterial({
       map: facadeTex,
@@ -97,7 +168,7 @@ export class InstancedPropPool {
       const h = 22 + ((i * 7) % 28);
       bRecords.push({
         z: -20 + i * (this.spanZ / bCount),
-        lateralOffset: side * (16 + (i % 4) * 3.8),
+        lateralOffset: side * (16.5 + (i % 4) * 3.8),
         yawOffset: 0,
         sx: 0.9 + (i % 3) * 0.25,
         sy: h,
@@ -107,54 +178,9 @@ export class InstancedPropPool {
     }
     this.layers.push(bLayers);
     this.records.push(bRecords);
-
-    // Group 1: Streetlights + Warm Asphalt Light Pools (20 pooled instances -> 4 draw calls total)
-    const lCount = 20;
-    const poleMat = new THREE.MeshStandardMaterial({ color: 0x475569, metalness: 0.78, roughness: 0.32 });
-    const lampMat = new THREE.MeshBasicMaterial({ color: 0xfef3c7 });
-    const poolMat = new THREE.MeshBasicMaterial({
-      map: lampPoolTex,
-      transparent: true,
-      depthWrite: false,
-      blending: THREE.AdditiveBlending,
-    });
-
-    const poleGeo = new THREE.CylinderGeometry(0.09, 0.14, 6.4, 6);
-    poleGeo.translate(0, 3.2, 0);
-    const armGeo = new THREE.BoxGeometry(2.6, 0.1, 0.1);
-    armGeo.translate(1.15, 6.25, 0);
-    const lampGeo = new THREE.BoxGeometry(0.62, 0.12, 0.28);
-    lampGeo.translate(2.2, 6.18, 0);
-    const poolGeo = new THREE.PlaneGeometry(8.5, 8.5);
-    poolGeo.rotateX(-Math.PI / 2);
-    poolGeo.translate(2.2, 0.04, 0);
-
-    const lLayers: InstancedLayer[] = [
-      this.createLayer(poleGeo, poleMat, lCount, new THREE.Vector3(), 0, false),
-      this.createLayer(armGeo, poleMat, lCount, new THREE.Vector3(), 0, false),
-      this.createLayer(lampGeo, lampMat, lCount, new THREE.Vector3(), 0, false),
-      this.createLayer(poolGeo, poolMat, lCount, new THREE.Vector3(), 0, false),
-    ];
-
-    const lRecords: PropRecord[] = [];
-    for (let i = 0; i < lCount; i++) {
-      const side = i % 2 === 0 ? -1 : 1;
-      lRecords.push({
-        z: -10 + i * (this.spanZ / lCount),
-        lateralOffset: side * 8.9,
-        yawOffset: side === -1 ? 0 : Math.PI,
-        sx: 1,
-        sy: 1,
-        sz: 1,
-        side,
-      });
-    }
-    this.layers.push(lLayers);
-    this.records.push(lRecords);
   }
 
   private buildVillageProps(): void {
-    // Group 0: Village Cottages (16 pooled instances)
     const hCount = 16;
     const wallMat = new THREE.MeshStandardMaterial({ color: 0xfef3c7, roughness: 0.85 });
     const roofMat = new THREE.MeshStandardMaterial({ color: 0xb45309, roughness: 0.75 });
@@ -178,7 +204,7 @@ export class InstancedPropPool {
       const side = i % 2 === 0 ? -1 : 1;
       hRecords.push({
         z: -15 + i * (this.spanZ / hCount),
-        lateralOffset: side * (14.5 + (i % 3) * 4.5),
+        lateralOffset: side * (15.0 + (i % 3) * 4.5),
         yawOffset: side === -1 ? Math.PI / 2 : -Math.PI / 2,
         sx: 0.95 + (i % 3) * 0.12,
         sy: 0.95 + (i % 2) * 0.15,
@@ -189,28 +215,27 @@ export class InstancedPropPool {
     this.layers.push(hLayers);
     this.records.push(hRecords);
 
-    // Group 1: Oak Trees (28 pooled instances)
-    this.addOakLayer(28, 11.5);
+    this.addOakLayer(26, 12.0);
   }
 
   private buildForestProps(): void {
-    // Group 0: Dense Pine Trees (32 pooled instances)
-    this.addPineLayer(32, 10.5);
-    // Group 1: Granite Boulders (16 pooled instances)
-    this.addRockLayer(16, 10.2);
+    this.addPineLayer(30, 11.2);
+    this.addRockLayer(14, 10.8);
   }
 
   private buildCoastalProps(): void {
-    // Group 0: Palm Trees (28 pooled instances)
-    const pCount = 28;
+    const pCount = 26;
     const trunkMat = new THREE.MeshStandardMaterial({ color: 0x8b6b4a, roughness: 0.9 });
-    const frondMat = new THREE.MeshStandardMaterial({ color: 0x228b22, roughness: 0.72, side: THREE.DoubleSide });
+    const frondMat = new THREE.MeshStandardMaterial({
+      color: 0x228b22,
+      roughness: 0.72,
+      side: THREE.DoubleSide,
+    });
 
     const trunkGeo = new THREE.CylinderGeometry(0.18, 0.34, 6.2, 6);
     trunkGeo.rotateZ(0.08);
     trunkGeo.translate(0, 3.0, 0);
 
-    // Crossed palm canopy cluster
     const frondGeo = new THREE.ConeGeometry(2.6, 1.35, 6);
     frondGeo.scale(1, -1, 1);
     frondGeo.translate(-0.22, 5.8, 0);
@@ -222,7 +247,7 @@ export class InstancedPropPool {
     const pRecords: PropRecord[] = [];
     for (let i = 0; i < pCount; i++) {
       const side = i % 2 === 0 ? -1 : 1;
-      const lat = side === 1 ? 10.2 + (i % 2) * 2.0 : -(11.2 + (i % 4) * 3.5);
+      const lat = side === 1 ? 10.6 + (i % 2) * 2.0 : -(11.8 + (i % 4) * 3.5);
       const s = 0.88 + (i % 4) * 0.1;
       pRecords.push({
         z: -20 + i * (this.spanZ / pCount),
@@ -237,8 +262,7 @@ export class InstancedPropPool {
     this.layers.push(pLayers);
     this.records.push(pRecords);
 
-    // Group 1: Left Cliff Boulders (14 pooled instances on left side -1)
-    this.addRockLayer(14, 12.5, -1);
+    this.addRockLayer(14, 13.0, -1);
   }
 
   private addOakLayer(count: number, minLat: number): void {
@@ -307,7 +331,11 @@ export class InstancedPropPool {
   }
 
   private addRockLayer(count: number, minLat: number, fixedSide?: number): void {
-    const rockMat = new THREE.MeshStandardMaterial({ color: 0x64748b, roughness: 0.92, flatShading: true });
+    const rockMat = new THREE.MeshStandardMaterial({
+      color: 0x64748b,
+      roughness: 0.92,
+      flatShading: true,
+    });
     const rockGeo = new THREE.DodecahedronGeometry(1.3, 0);
     rockGeo.scale(1.3, 0.8, 1.1);
     rockGeo.translate(0, 0.65, 0);
@@ -364,8 +392,9 @@ export class InstancedPropPool {
   }
 
   private applyRecord(lays: InstancedLayer[], rec: PropRecord, index: number): void {
-    const cx = getTrackCenterX(rec.z);
-    const yaw = getTrackYaw(rec.z);
+    const cx = getTrackCenterX(rec.z, this.trackId);
+    const cy = getTrackElevationY(rec.z, this.trackId);
+    const yaw = getTrackYaw(rec.z, this.trackId);
     const cosY = Math.cos(yaw);
     const sinY = Math.sin(yaw);
     const wx = cx + rec.lateralOffset * cosY;
@@ -378,12 +407,12 @@ export class InstancedPropPool {
       if (layer.scaleWithProp) {
         _pos.set(
           wx + layer.localOffset.x * rec.sx,
-          layer.localOffset.y * rec.sy,
+          cy + layer.localOffset.y * rec.sy,
           wz + layer.localOffset.z * rec.sz
         );
         _scale.set(rec.sx, layer.scaleYWithProp ? rec.sy : 1, rec.sz);
       } else {
-        _pos.set(wx, 0, wz);
+        _pos.set(wx, cy, wz);
         _scale.set(1, 1, 1);
       }
       _mat4.compose(_pos, _quat, _scale);

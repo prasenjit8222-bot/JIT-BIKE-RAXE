@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import {
   Camera,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
   ChevronUp,
@@ -13,12 +14,14 @@ import {
   Radio,
   RotateCw,
   ShieldAlert,
+  Trophy,
   Volume2,
   VolumeX,
   X,
 } from 'lucide-react';
 import { RACE_DISTANCE } from '../data/catalog';
 import { CameraMode, ControlInputs, GamePhase, HudSnapshot } from '../types/game';
+import { AvatarBadge } from './AvatarBadge';
 
 interface RaceHudProps {
   phase: GamePhase;
@@ -67,6 +70,7 @@ export const RaceHud: React.FC<RaceHudProps> = ({
   showRotateHint,
   onDismissRotateHint,
 }) => {
+  const [leaderboardOpen, setLeaderboardOpen] = useState<boolean>(true);
   const rankIdx = Math.max(0, Math.min(4, (hud?.positionRank ?? 1) - 1));
   const rankLabel = RANK_ORDINAL[rankIdx];
 
@@ -100,7 +104,7 @@ export const RaceHud: React.FC<RaceHudProps> = ({
         />
       )}
 
-      {/* Floating 3D-Projected Bike Name Tags (always pointer-events-none) */}
+      {/* Floating 3D-Projected Bike Name Tags with Circular Profile Pictures (always pointer-events-none) */}
       {hud?.floatingTags.map((tag) => {
         if (!tag.visible) return null;
         const scale = Math.max(0.72, Math.min(1, 1 - tag.distance / 150));
@@ -110,8 +114,9 @@ export const RaceHud: React.FC<RaceHudProps> = ({
             style={{
               transform: `translate3d(${tag.x}px, ${tag.y}px, 0) translate(-50%, -100%) scale(${scale})`,
             }}
-            className="pointer-events-none absolute left-0 top-0 flex items-center gap-1.5 rounded border border-white/15 bg-[#070b14]/80 px-2 py-0.5 text-[11px] font-semibold text-white whitespace-nowrap"
+            className="pointer-events-none absolute left-0 top-0 flex items-center gap-1.5 rounded-full border border-white/20 bg-[#070b14]/84 py-0.5 pl-1 pr-2 text-[11px] font-semibold text-white whitespace-nowrap"
           >
+            <AvatarBadge src={tag.avatar} name={tag.name} size="xs" />
             <span className="font-mono-num text-amber-400">#{tag.positionRank}</span>
             <span>{tag.name}</span>
             {tag.isSpeaking && <Radio className="h-3 w-3 text-emerald-400" />}
@@ -533,6 +538,62 @@ export const RaceHud: React.FC<RaceHudProps> = ({
             </div>
           </div>
         </>
+      )}
+
+      {/* Live Mini-Leaderboard (All 5 Racers with Circular Profile Pictures & Names) */}
+      {hud && hud.standings.length > 0 && (
+        <div
+          style={{ zIndex: 9998 }}
+          className={`pointer-events-auto fixed left-2.5 sm:left-4 ${
+            touchEnabled ? 'top-[96px] sm:top-[64px]' : 'top-[76px]'
+          } w-[166px] sm:w-[196px] rounded-xl border border-white/12 bg-[#090d17]/82 px-2 py-1.5`}
+        >
+          <button
+            type="button"
+            onClick={() => setLeaderboardOpen((v) => !v)}
+            className="flex w-full items-center justify-between text-[10px] font-bold uppercase tracking-wider text-slate-300 cursor-pointer"
+          >
+            <span className="flex items-center gap-1">
+              <Trophy className="h-3 w-3 text-amber-400" />
+              <span>Live Grid</span>
+            </span>
+            {leaderboardOpen ? (
+              <ChevronUp className="h-3 w-3 text-slate-400" />
+            ) : (
+              <ChevronDown className="h-3 w-3 text-slate-400" />
+            )}
+          </button>
+
+          {leaderboardOpen && (
+            <ul className="mt-1.5 space-y-1">
+              {hud.standings.map((row) => (
+                <li
+                  key={row.id}
+                  className={`flex items-center gap-1.5 rounded-md px-1.5 py-0.5 text-[11px] ${
+                    row.isLocal
+                      ? 'bg-amber-500/20 font-bold text-white'
+                      : 'text-slate-300'
+                  }`}
+                >
+                  <span
+                    className={`font-mono-num w-4 shrink-0 text-[10px] font-bold ${
+                      row.rank === 1 ? 'text-amber-400' : 'text-slate-400'
+                    }`}
+                  >
+                    #{row.rank}
+                  </span>
+                  <AvatarBadge
+                    src={row.avatar}
+                    name={row.name}
+                    size="xs"
+                    highlight={row.isLocal}
+                  />
+                  <span className="min-w-0 flex-1 truncate">{row.name}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
       )}
 
       {/* City Road Police Pursuit Alert Banner (clear below top header) */}

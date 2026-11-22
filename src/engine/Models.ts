@@ -1,6 +1,13 @@
 import * as THREE from 'three';
-import { BIKES } from '../data/catalog';
-import { BikeId } from '../types/game';
+import { BIKES, PAINT_COLORS } from '../data/catalog';
+import { BikeId, PaintColorId, PowerUpKind } from '../types/game';
+
+export interface SuperbikeBuildOptions {
+  paintId?: PaintColorId;
+  underglow?: boolean;
+  turboExhaust?: boolean;
+  heavyBumper?: boolean;
+}
 
 export interface SuperbikeRig {
   root: THREE.Group;
@@ -14,6 +21,11 @@ export interface SuperbikeRig {
   nitroFlameRight: THREE.Group;
   nitroParticles: THREE.Mesh[];
   brakeLightMat: THREE.MeshStandardMaterial;
+  headlightMat: THREE.MeshStandardMaterial;
+  headBeamMat: THREE.MeshBasicMaterial;
+  headBeamMesh: THREE.Mesh;
+  underglowMesh: THREE.Mesh;
+  shieldDome: THREE.Mesh;
   cockpitAnchor: THREE.Object3D;
 }
 
@@ -179,9 +191,14 @@ function createNitroFlamePlume(): THREE.Group {
 
 export function createSuperbikeGroup(
   bikeId: BikeId,
-  shadowTex?: THREE.Texture
+  shadowTex?: THREE.Texture,
+  options?: SuperbikeBuildOptions
 ): SuperbikeRig {
   const spec = BIKES[bikeId];
+  const paintSpec = options?.paintId ? PAINT_COLORS[options.paintId] : PAINT_COLORS[spec.defaultPaint];
+  const primaryHex = paintSpec?.hex ?? spec.primaryColor;
+  const accentHex = paintSpec?.accentHex ?? spec.accentColor;
+
   const root = new THREE.Group();
 
   if (shadowTex) {
@@ -197,6 +214,38 @@ export function createSuperbikeGroup(
     root.add(shadowPlane);
   }
 
+  // Optional Neon Underglow ground strip (visible when Neon Underglow tool is equipped)
+  const underglowMat = new THREE.MeshBasicMaterial({
+    color: accentHex,
+    transparent: true,
+    opacity: 0.52,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+  });
+  const underglowMesh = new THREE.Mesh(new THREE.PlaneGeometry(1.35, 2.55), underglowMat);
+  underglowMesh.rotation.x = -Math.PI / 2;
+  underglowMesh.position.y = 0.035;
+  underglowMesh.visible = Boolean(options?.underglow);
+  root.add(underglowMesh);
+
+  // Energy Shield protective translucent dome (hidden until Shield Power-Up collected)
+  const shieldDome = new THREE.Mesh(
+    new THREE.SphereGeometry(1.38, 16, 12),
+    new THREE.MeshBasicMaterial({
+      color: 0x38bdf8,
+      transparent: true,
+      opacity: 0.24,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+      wireframe: false,
+      side: THREE.DoubleSide,
+    })
+  );
+  shieldDome.scale.set(0.75, 0.85, 1.2);
+  shieldDome.position.set(0, 0.92, 0.02);
+  shieldDome.visible = false;
+  root.add(shieldDome);
+
   const leanGroup = new THREE.Group();
   root.add(leanGroup);
 
@@ -205,9 +254,9 @@ export function createSuperbikeGroup(
   leanGroup.add(wheeliePivot);
 
   const primaryMat = new THREE.MeshStandardMaterial({
-    color: spec.primaryColor,
-    metalness: 0.72,
-    roughness: 0.18,
+    color: primaryHex,
+    metalness: paintSpec?.metalness ?? 0.72,
+    roughness: paintSpec?.roughness ?? 0.18,
     envMapIntensity: 1.35,
   });
 
@@ -218,7 +267,7 @@ export function createSuperbikeGroup(
   });
 
   const accentMat = new THREE.MeshStandardMaterial({
-    color: spec.accentColor,
+    color: accentHex,
     metalness: 0.68,
     roughness: 0.24,
   });
@@ -299,12 +348,59 @@ export function createSuperbikeGroup(
   saddle.position.set(0, 0.79, -0.25);
   chassis.add(saddle);
 
-  // 5. Aerodynamic Side Winglets
-  const wingSpan = bikeId === 'volt' ? 0.76 : 0.64;
-  const winglet = new THREE.Mesh(new THREE.BoxGeometry(wingSpan, 0.032, 0.22), accentMat);
+  // 5. Aerodynamic Side Winglets + Distinct Silhouette Attachments per Superbike Model
+  const wingSpan =
+    bikeId === 'titan' ? 0.84 : bikeId === 'volt' ? 0.78 : bikeId === 'viper' ? 0.56 : 0.66;
+  const winglet = new THREE.Mesh(new THREE.BoxGeometry(wingSpan, 0.036, 0.24), accentMat);
   winglet.position.set(0, 0.72, 0.66);
   winglet.rotation.x = 0.16;
   chassis.add(winglet);
+
+  if (spec.bodyStyle === 'proto') {
+    // Titan RR-1200: Aggressive dorsal shark-fin tail & dual front ram-air scoop
+    const sharkFin = new THREE.Mesh(new THREE.BoxGeometry(0.055, 0.22, 0.44), accentMat);
+    sharkFin.position.set(0, 1.04, -0.68);
+    sharkFin.rotation.x = -0.35;
+    const ramAir = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.12, 0.26), carbonMat);
+    ramAir.position.set(0, 0.86, 0.88);
+    const tailWing = new THREE.Mesh(new THREE.BoxGeometry(0.58, 0.032, 0.16), primaryMat);
+    tailWing.position.set(0, 1.07, -0.84);
+    tailWing.rotation.x = 0.2;
+    chassis.add(sharkFin, ramAir, tailWing);
+  } else if (spec.bodyStyle === 'streetfighter') {
+    // Viper RS-900: Exposed tubular trellis frame bars & compact belly pan
+    for (const s of [-1, 1]) {
+      const trellis = new THREE.Mesh(new THREE.CylinderGeometry(0.022, 0.022, 0.56, 6), accentMat);
+      trellis.rotation.x = Math.PI / 2 - 0.28;
+      trellis.position.set(s * 0.21, 0.68, 0.12);
+      chassis.add(trellis);
+    }
+  } else if (spec.bodyStyle === 'gt') {
+    // Phantom GT: Extended touring aero side pods & sleek tail cowl
+    const sidePodL = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.24, 0.72), carbonMat);
+    sidePodL.position.set(-0.23, 0.58, 0.24);
+    const sidePodR = sidePodL.clone();
+    sidePodR.position.x = 0.23;
+    chassis.add(sidePodL, sidePodR);
+  } else if (spec.bodyStyle === 'hyper') {
+    // Volt Hyper-X: Twin turbine side intakes
+    for (const s of [-1, 1]) {
+      const intake = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.09, 0.42, 10), accentMat);
+      intake.rotation.x = Math.PI / 2;
+      intake.position.set(s * 0.24, 0.68, 0.46);
+      chassis.add(intake);
+    }
+  }
+
+  // Optional Heavy Bumper Guard (reinforced carbon-steel ram guard on front nose)
+  if (options?.heavyBumper) {
+    const guardBar = new THREE.Mesh(new THREE.TorusGeometry(0.24, 0.032, 8, 16, Math.PI), titaniumMat);
+    guardBar.rotation.x = Math.PI / 2;
+    guardBar.position.set(0, 0.56, 0.98);
+    const skidPlate = new THREE.Mesh(new THREE.BoxGeometry(0.46, 0.12, 0.14), carbonMat);
+    skidPlate.position.set(0, 0.46, 1.02);
+    chassis.add(guardBar, skidPlate);
+  }
 
   // 6. USD Front Forks, Fender, Windscreen & Side Mirrors
   const forkGeo = new THREE.CylinderGeometry(0.032, 0.026, 0.74, 8);
@@ -375,7 +471,7 @@ export function createSuperbikeGroup(
   cockpitAnchor.position.set(0, 1.29, 0.3);
   chassis.add(cockpitAnchor);
 
-  // 7. Twin LED Headlights + Additive Forward Headlight Beam Cone
+  // 7. Twin LED Headlights + Dynamic Forward Headlight Beam Cone (brightens in Night Mode!)
   const hlMat = new THREE.MeshStandardMaterial({
     color: 0xffffff,
     emissive: 0xe0f2fe,
@@ -390,20 +486,20 @@ export function createSuperbikeGroup(
   chassis.add(hlL, hlR);
 
   // Soft LED Headlight Beam Cone projecting ahead
-  const beamGeo = new THREE.ConeGeometry(1.45, 8.5, 12, 1, true);
+  const beamGeo = new THREE.ConeGeometry(2.35, 16.5, 14, 1, true);
   beamGeo.rotateX(-Math.PI / 2);
-  beamGeo.translate(0, 0, 4.25);
+  beamGeo.translate(0, 0, 8.25);
   const beamMat = new THREE.MeshBasicMaterial({
     color: 0xe0f2fe,
     transparent: true,
-    opacity: 0.075,
+    opacity: 0.06,
     blending: THREE.AdditiveBlending,
     depthWrite: false,
     side: THREE.DoubleSide,
   });
   const headBeam = new THREE.Mesh(beamGeo, beamMat);
   headBeam.position.set(0, 0.78, 0.96);
-  headBeam.rotation.x = 0.08;
+  headBeam.rotation.x = 0.06;
   chassis.add(headBeam);
 
   // Dual Glowing Red LED Tail Lights
@@ -420,16 +516,27 @@ export function createSuperbikeGroup(
   tailLedR.rotation.z = -0.24;
   chassis.add(tailLedL, tailLedR);
 
-  // 8. Dual Titanium Exhaust Pipes, Nitro Flame Plumes & Nitro Jet Particles
-  const exhaustGeo = new THREE.CylinderGeometry(0.044, 0.064, 0.52, 10);
+  // 8. Dual / Quad Titanium Exhaust Pipes (Turbo Exhaust adds twin burnt-blue race cans)
+  const exRadius = options?.turboExhaust || spec.bodyStyle === 'proto' ? 0.056 : 0.044;
+  const exhaustGeo = new THREE.CylinderGeometry(exRadius, exRadius + 0.02, 0.56, 10);
   exhaustGeo.rotateX(Math.PI / 2 - 0.22);
-  const exL = new THREE.Mesh(exhaustGeo, titaniumMat);
+  const exMat = options?.turboExhaust ? goldForkMat : titaniumMat;
+  const exL = new THREE.Mesh(exhaustGeo, exMat);
   exL.position.set(-0.2, 0.53, -0.68);
   const exR = exL.clone();
   exR.position.x = 0.2;
   chassis.add(exL, exR);
 
-  const tipGeo = new THREE.CylinderGeometry(0.036, 0.042, 0.08, 10);
+  if (spec.bodyStyle === 'proto' || options?.turboExhaust) {
+    const upperCanL = new THREE.Mesh(new THREE.CylinderGeometry(0.036, 0.042, 0.38, 8), titaniumMat);
+    upperCanL.rotation.x = Math.PI / 2 - 0.18;
+    upperCanL.position.set(-0.12, 0.82, -0.78);
+    const upperCanR = upperCanL.clone();
+    upperCanR.position.x = 0.12;
+    chassis.add(upperCanL, upperCanR);
+  }
+
+  const tipGeo = new THREE.CylinderGeometry(0.038, 0.044, 0.09, 10);
   tipGeo.rotateX(Math.PI / 2 - 0.22);
   const tipL = new THREE.Mesh(tipGeo, carbonMat);
   tipL.position.set(-0.2, 0.58, -0.92);
@@ -479,7 +586,7 @@ export function createSuperbikeGroup(
     metalness: 0.14,
   });
   const suitColorMat = new THREE.MeshStandardMaterial({
-    color: spec.primaryColor,
+    color: primaryHex,
     roughness: 0.42,
     metalness: 0.28,
   });
@@ -489,7 +596,7 @@ export function createSuperbikeGroup(
     metalness: 0.45,
   });
   const helmetShellMat = new THREE.MeshStandardMaterial({
-    color: spec.accentColor,
+    color: accentHex,
     metalness: 0.65,
     roughness: 0.14,
     envMapIntensity: 1.4,
@@ -596,6 +703,11 @@ export function createSuperbikeGroup(
     nitroFlameRight,
     nitroParticles,
     brakeLightMat,
+    headlightMat: hlMat,
+    headBeamMat: beamMat,
+    headBeamMesh: headBeam,
+    underglowMesh,
+    shieldDome,
     cockpitAnchor,
   };
 }
@@ -907,5 +1019,171 @@ export function createNitroPickupGroup(): THREE.Group {
   const aura = new THREE.Mesh(new THREE.SphereGeometry(0.62, 10, 8), _nitroGlowMat);
   g.add(aura);
 
+  return g;
+}
+
+// ======================================================
+// Pooled Track Obstacles, Jump Ramps, Boost Pads & Power-Ups
+// ======================================================
+
+export function createJumpRampGroup(rampTex: THREE.Texture): THREE.Group {
+  const g = new THREE.Group();
+  const shape = new THREE.Shape();
+  shape.moveTo(0, 0);
+  shape.lineTo(6.8, 0);
+  shape.lineTo(6.8, 1.35);
+  shape.closePath();
+
+  const geo = new THREE.ExtrudeGeometry(shape, { depth: 3.1, bevelEnabled: false });
+  geo.rotateY(-Math.PI / 2);
+  geo.translate(1.55, 0, -3.4);
+
+  const sideMat = new THREE.MeshStandardMaterial({
+    color: 0x1e293b,
+    roughness: 0.5,
+    metalness: 0.5,
+  });
+  const rampBody = new THREE.Mesh(geo, sideMat);
+  g.add(rampBody);
+
+  // Sloped top launch deck with chevron arrows
+  const deckLen = Math.hypot(6.8, 1.35);
+  const slopeAngle = Math.atan2(1.35, 6.8);
+  const deckGeo = new THREE.PlaneGeometry(3.15, deckLen);
+  deckGeo.rotateX(-Math.PI / 2 - slopeAngle);
+  const deckMat = new THREE.MeshBasicMaterial({ map: rampTex });
+  const deck = new THREE.Mesh(deckGeo, deckMat);
+  deck.position.set(0, 0.72, 0);
+  g.add(deck);
+
+  // Glowing side LED rails
+  const railMat = new THREE.MeshBasicMaterial({ color: 0xf59e0b });
+  const railGeo = new THREE.BoxGeometry(0.12, 0.14, deckLen);
+  for (const s of [-1, 1]) {
+    const rail = new THREE.Mesh(railGeo, railMat);
+    rail.position.set(s * 1.56, 0.74, 0);
+    rail.rotation.x = -slopeAngle;
+    g.add(rail);
+  }
+  return g;
+}
+
+export function createBoostPadMesh(boostTex: THREE.Texture): THREE.Mesh {
+  const geo = new THREE.PlaneGeometry(3.2, 9.5);
+  geo.rotateX(-Math.PI / 2);
+  const mat = new THREE.MeshBasicMaterial({
+    map: boostTex,
+    transparent: true,
+    opacity: 0.92,
+    polygonOffset: true,
+    polygonOffsetFactor: -1,
+  });
+  return new THREE.Mesh(geo, mat);
+}
+
+const _coinGeo = new THREE.CylinderGeometry(0.42, 0.42, 0.11, 14);
+_coinGeo.rotateZ(Math.PI / 2);
+const _coinMat = new THREE.MeshStandardMaterial({
+  color: 0xfacc15,
+  emissive: 0xb45309,
+  emissiveIntensity: 0.75,
+  metalness: 0.88,
+  roughness: 0.18,
+});
+const _coinRimGeo = new THREE.TorusGeometry(0.42, 0.055, 6, 14);
+_coinRimGeo.rotateY(Math.PI / 2);
+
+export function createRoadCoinGroup(): THREE.Group {
+  const g = new THREE.Group();
+  const disc = new THREE.Mesh(_coinGeo, _coinMat);
+  const rim = new THREE.Mesh(_coinRimGeo, _coinMat);
+  g.add(disc, rim);
+  return g;
+}
+
+export function createPowerUpGroup(kind: PowerUpKind): THREE.Group {
+  const g = new THREE.Group();
+
+  if (kind === 'shield') {
+    const core = new THREE.Mesh(
+      new THREE.OctahedronGeometry(0.44, 0),
+      new THREE.MeshBasicMaterial({ color: 0x38bdf8 })
+    );
+    const ring = new THREE.Mesh(
+      new THREE.TorusGeometry(0.62, 0.055, 8, 20),
+      new THREE.MeshBasicMaterial({ color: 0xe0f2fe })
+    );
+    const aura = new THREE.Mesh(
+      new THREE.SphereGeometry(0.74, 10, 8),
+      new THREE.MeshBasicMaterial({
+        color: 0x0284c7,
+        transparent: true,
+        opacity: 0.36,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+      })
+    );
+    g.add(core, ring, aura);
+  } else if (kind === 'magnet') {
+    // Horseshoe magnet shape
+    const arc = new THREE.Mesh(
+      new THREE.TorusGeometry(0.34, 0.11, 8, 16, Math.PI),
+      new THREE.MeshBasicMaterial({ color: 0xec4899 })
+    );
+    const tipMat = new THREE.MeshBasicMaterial({ color: 0xf8fafc });
+    const tipL = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.22, 0.22), tipMat);
+    tipL.position.set(-0.34, -0.1, 0);
+    const tipR = tipL.clone();
+    tipR.position.x = 0.34;
+    const aura = new THREE.Mesh(
+      new THREE.SphereGeometry(0.72, 10, 8),
+      new THREE.MeshBasicMaterial({
+        color: 0xd946ef,
+        transparent: true,
+        opacity: 0.32,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+      })
+    );
+    g.add(arc, tipL, tipR, aura);
+  } else {
+    // Repair Wrench & Nitro Refill Kit (Emerald cross + wrench bar)
+    const mat = new THREE.MeshBasicMaterial({ color: 0x10b981 });
+    const bar1 = new THREE.Mesh(new THREE.BoxGeometry(0.72, 0.22, 0.22), mat);
+    const bar2 = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.72, 0.22), mat);
+    const ring = new THREE.Mesh(
+      new THREE.TorusGeometry(0.58, 0.05, 8, 20),
+      new THREE.MeshBasicMaterial({ color: 0x6ee7b7 })
+    );
+    const aura = new THREE.Mesh(
+      new THREE.SphereGeometry(0.72, 10, 8),
+      new THREE.MeshBasicMaterial({
+        color: 0x10b981,
+        transparent: true,
+        opacity: 0.34,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+      })
+    );
+    g.add(bar1, bar2, ring, aura);
+  }
+
+  return g;
+}
+
+const _chevronPoleGeo = new THREE.CylinderGeometry(0.08, 0.09, 2.8, 6);
+_chevronPoleGeo.translate(0, 1.4, 0);
+const _chevronPoleMat = new THREE.MeshStandardMaterial({ color: 0x475569, metalness: 0.7, roughness: 0.35 });
+const _chevronBoardGeo = new THREE.BoxGeometry(2.2, 1.1, 0.12);
+
+export function createChevronSignGroup(tex: THREE.Texture): THREE.Group {
+  const g = new THREE.Group();
+  const pole = new THREE.Mesh(_chevronPoleGeo, _chevronPoleMat);
+  const board = new THREE.Mesh(
+    _chevronBoardGeo,
+    new THREE.MeshBasicMaterial({ map: tex })
+  );
+  board.position.set(0, 2.45, 0);
+  g.add(pole, board);
   return g;
 }
