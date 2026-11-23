@@ -239,6 +239,7 @@ export class RaceEngine {
   private roadTextures: THREE.Texture[] = [];
   private roadMat: THREE.MeshStandardMaterial | null = null;
   private ribbonLayers: RibbonLayer[] = [];
+  private lastRibbonStartZ = Number.NaN;
   private propPool: InstancedPropPool | null = null;
   private speedBreakers: THREE.Mesh[] = [];
   private chevronLeftPool: THREE.Group[] = [];
@@ -328,7 +329,7 @@ export class RaceEngine {
       typeof window !== 'undefined' &&
       (window.matchMedia?.('(pointer: coarse)')?.matches ||
         /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent));
-    this.rainCount = this.isMobile ? 200 : 360;
+    this.rainCount = this.isMobile ? 140 : 320;
   }
 
   private yieldFrame(ms = 16): Promise<void> {
@@ -812,17 +813,36 @@ export class RaceEngine {
     this.collisionFlash = 0;
     this.nitroFlash = 0;
     this.camRoll = 0;
+    this.lastRibbonStartZ = Number.NaN;
+
+    // Ensure aspect ratio & renderer size match current viewport immediately
+    this.handleResize();
+
+    // Synchronously place road ribbon, traffic, pickups, ramps, props & camera BEFORE countdown starts
+    const startZ = this.localRacer ? this.localRacer.z : 0;
+    const now = performance.now();
+    this.updateRoadRibbon(startZ, now, true);
+    this.updateTraffic(0);
+    this.updateNitroPickups(0, now);
+    this.updatePowerUpsAndCoins(0, now);
+    this.updateRampsAndBoostPads(0);
 
     if (this.localRacer) {
-      const gz = this.localRacer.z;
-      const gx = getTrackCenterX(gz, trackId) + this.localRacer.lateralX;
-      const gy = getTrackElevationY(gz, trackId);
-      this.camPos.set(gx, gy + 2.05, gz - 4.6);
-      this.camLook.set(gx, gy + 1.02, gz + 14);
+      const r = this.localRacer;
+      r.y = getRoadSurfaceY(r.lateralX, r.z, trackId);
+      this.placeRacerTransform(r, now);
+
+      const gz = r.z;
+      const gx = getTrackCenterX(gz, trackId) + r.lateralX;
+      const gy = r.y;
+      const wideMobile = this.camera.aspect > 1.75;
+      const initDist = wideMobile ? 4.9 : 4.5;
+      const initHeight = wideMobile ? 1.88 : 2.05;
+      this.camPos.set(gx, gy + initHeight, gz - initDist);
+      this.camLook.set(gx, gy + 0.92, gz + 14);
       this.camera.position.copy(this.camPos);
       this.camera.lookAt(this.camLook);
       this.skyDome.position.copy(this.camera.position);
-      this.updateRoadRibbon(gz, performance.now());
     }
 
     if (this.renderer && !this.isSoftwareGl && !this.isMobile) {
@@ -914,12 +934,20 @@ export class RaceEngine {
     return { mesh, geo, posAttr, uvAttr, leftLat, rightLat, leftY, rightY, uvVScale, isOcean };
   }
 
-  private updateRoadRibbon(refZ: number, nowMs: number): void {
+  private updateRoadRibbon(refZ: number, nowMs: number, force = false): void {
     const startZ = Math.floor(refZ / RIBBON_SLICE_STEP) * RIBBON_SLICE_STEP - 36;
     const trackId = this.currentTrackId;
+    const geomDirty = force || startZ !== this.lastRibbonStartZ;
+    if (!geomDirty && trackId !== 'coastal') {
+      return;
+    }
+    this.lastRibbonStartZ = startZ;
 
     for (let lIdx = 0; lIdx < this.ribbonLayers.length; lIdx++) {
       const layer = this.ribbonLayers[lIdx];
+      // When only ocean wave animates, skip rebuilding static road/barrier layers!
+      if (!geomDirty && !layer.isOcean) continue;
+
       const posArr = layer.posAttr.array as Float32Array;
       const uvArr = layer.uvAttr.array as Float32Array;
 
@@ -935,12 +963,10 @@ export class RaceEngine {
           ? Math.sin(nowMs * 0.0024 + z * 0.03) * 0.22
           : 0;
 
-        // Left vertex
         const lx = cx + layer.leftLat * cosY;
         const lz = z - layer.leftLat * sinY;
         const ly = cy + layer.leftY + waveOffset;
 
-        // Right vertex
         const rx = cx + layer.rightLat * cosY;
         const rz = z - layer.rightLat * sinY;
         const ry = cy + layer.rightY + waveOffset;
@@ -963,7 +989,9 @@ export class RaceEngine {
 
       layer.posAttr.needsUpdate = true;
       layer.uvAttr.needsUpdate = true;
-      layer.geo.computeVertexNormals();
+      if (geomDirty) {
+        layer.geo.computeVertexNormals();
+      }
     }
   }
 
@@ -980,6 +1008,7 @@ export class RaceEngine {
       map: roadTex,
       roughness: 0.78,
       metalness: 0.06,
+      side: THREE.DoubleSide,
     });
     this.roadMat = roadMat;
 
@@ -987,6 +1016,7 @@ export class RaceEngine {
       map: footpathTex,
       roughness: 0.9,
       metalness: 0.02,
+      side: THREE.DoubleSide,
     });
     const groundMat = new THREE.MeshStandardMaterial({
       color: spec.groundColor,
@@ -1437,9 +1467,16 @@ export class RaceEngine {
 
   private bindEvents(): void {
     window.addEventListener('resize', this.handleResize);
-    window.addEventListener('orientationchange', this.handleResize);
+    window.addEventListener('orientationchange', this.handleOrientationResize);
+    document.addEventListener('fullscreenchange', this.handleOrientationResize);
     window.visualViewport?.addEventListener('resize', this.handleResize);
   }
+
+  private handleOrientationResize = (): void => {
+    this.handleResize();
+    window.setTimeout(() => this.handleResize(), 140);
+    window.setTimeout(() => this.handleResize(), 320);
+  };
 
   private handleResize = (): void => {
     if (this.disposed || !this.renderer || !this.camera) return;
@@ -2515,9 +2552,30 @@ export class RaceEngine {
     }
 
     const isFar = this.cameraMode === 'far';
-    const dist = isFar ? 4.6 : 3.25;
-    const height = isFar ? 2.05 : 1.62;
-    const baseFov = isFar ? 65 : 68;
+    const aspect = this.camera.aspect || 1.6;
+    const isWideMobile = aspect > 1.78;
+    const isPortrait = aspect < 0.95;
+
+    // Responsive aspect-ratio chase framing so bike & rider stay large and centered on all screens
+    const dist = isFar
+      ? isWideMobile
+        ? 4.95
+        : isPortrait
+          ? 5.6
+          : 4.6
+      : isWideMobile
+        ? 3.55
+        : 3.25;
+    const height = isFar
+      ? isWideMobile
+        ? 1.88
+        : isPortrait
+          ? 2.25
+          : 2.05
+      : isWideMobile
+        ? 1.54
+        : 1.62;
+    const baseFov = isFar ? (isWideMobile ? 58 : isPortrait ? 74 : 65) : isWideMobile ? 62 : 68;
 
     const safeLat = THREE.MathUtils.clamp(
       r.lateralX,
@@ -2704,7 +2762,8 @@ export class RaceEngine {
     cancelAnimationFrame(this.frameId);
     window.clearTimeout(this.frameId);
     window.removeEventListener('resize', this.handleResize);
-    window.removeEventListener('orientationchange', this.handleResize);
+    window.removeEventListener('orientationchange', this.handleOrientationResize);
+    document.removeEventListener('fullscreenchange', this.handleOrientationResize);
     window.visualViewport?.removeEventListener('resize', this.handleResize);
     this.clearRaceWorld();
     this.skyDome?.geometry.dispose();

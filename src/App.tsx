@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { SoundEngine } from './audio/SoundEngine';
 import { GarageLobby } from './components/GarageLobby';
+import { GarageModal } from './components/GarageModal';
+import { LeaderboardModal } from './components/LeaderboardModal';
 import { LoginModal } from './components/LoginModal';
 import { PodiumModal } from './components/PodiumModal';
 import { ProfileModal } from './components/ProfileModal';
@@ -11,19 +13,29 @@ import {
   BikeId,
   CameraMode,
   ControlInputs,
+  GameMode,
   GamePhase,
   HudSnapshot,
   LobbySlot,
-  RaceStanding,
+  PaintColorId,
+  RaceFinishSummary,
+  RewardItemId,
   TrackId,
   UserProfile,
+  WeatherMode,
 } from './types/game';
 import { DEFAULT_AVATAR } from './utils/avatars';
 import {
   clearActiveSession,
+  getBikeCustomization,
+  getGlobalLeaderboard,
   loadActiveSession,
   recordRaceResult,
   saveProfile,
+  setBikePaintInProfile,
+  toggleToolEquipInProfile,
+  unlockBikeInProfile,
+  upgradeBikeStatInProfile,
 } from './utils/profileStorage';
 
 export default function App() {
@@ -43,7 +55,19 @@ export default function App() {
       name: 'Racer 01',
       avatar: DEFAULT_AVATAR,
       coins: 500,
-      stats: { races: 0, wins: 0, podiums: 0, bestWheelie: 0 },
+      unlockedBikes: ['apex'],
+      bikeCustomizations: {},
+      inventoryTools: [],
+      blueprints: 0,
+      stats: {
+        races: 0,
+        wins: 0,
+        podiums: 0,
+        bestWheelie: 0,
+        bestRaceTimeMs: null,
+        bestEndlessMeters: 0,
+        topSpeedKmh: 0,
+      },
       createdAt: Date.now(),
     };
   });
@@ -52,18 +76,35 @@ export default function App() {
 
   const [showLoginModal, setShowLoginModal] = useState<boolean>(true);
   const [showProfileModal, setShowProfileModal] = useState<boolean>(false);
-  const [lastCoinsEarned, setLastCoinsEarned] = useState<number>(0);
+  const [showGarageModal, setShowGarageModal] = useState<boolean>(false);
+  const [showLeaderboardModal, setShowLeaderboardModal] = useState<boolean>(false);
 
   const [selectedBike, setSelectedBike] = useState<BikeId>('apex');
+  const selectedBikeRef = useRef<BikeId>(selectedBike);
+  selectedBikeRef.current = selectedBike;
+
   const [selectedTrack, setSelectedTrack] = useState<TrackId>('city');
-  const [roomCode, setRoomCode] = useState<string>('GP101');
+  const [gameMode, setGameMode] = useState<GameMode>('standard');
+  const gameModeRef = useRef<GameMode>(gameMode);
+  gameModeRef.current = gameMode;
+
+  const [weatherMode, setWeatherMode] = useState<WeatherMode>('day');
+  const weatherModeRef = useRef<WeatherMode>(weatherMode);
+  weatherModeRef.current = weatherMode;
+
+  const [roomCode, setRoomCode] = useState<string>('1042');
   const [connectionStatus, setConnectionStatus] = useState<string>('Solo / Local Grid Ready');
   const [slots, setSlots] = useState<LobbySlot[]>([]);
 
   const [phase, setPhase] = useState<GamePhase>('lobby');
   const [countdownValue, setCountdownValue] = useState<number>(3);
   const [hud, setHud] = useState<HudSnapshot | null>(null);
-  const [standings, setStandings] = useState<RaceStanding[]>([]);
+  const [raceSummary, setRaceSummary] = useState<RaceFinishSummary | null>(null);
+  const [lastReward, setLastReward] = useState<{
+    coinsEarned: number;
+    wonItem: RewardItemId | null;
+    wonItemDuplicateBonus: number;
+  }>({ coinsEarned: 0, wonItem: null, wonItemDuplicateBonus: 0 });
   const [cameraMode, setCameraMode] = useState<CameraMode>('far');
 
   // Audio & Voice Chat states
@@ -109,58 +150,83 @@ export default function App() {
   });
 
   // Launch Race Helper (used by local Start button and remote host broadcast)
-  const launchRaceRef = useRef<(trackId: TrackId, broadcastStart: boolean) => void>(() => {});
+  const launchRaceRef = useRef<
+    (
+      trackId: TrackId,
+      broadcastStart: boolean,
+      overrideMode?: GameMode,
+      overrideWeather?: WeatherMode
+    ) => void
+  >(() => {});
 
-  const enterFullscreenAndLandscape = useCallback(async () => {
-    const docEl = document.documentElement as HTMLElement & {
-      webkitRequestFullscreen?: () => Promise<void> | void;
-    };
-    try {
-      if (!document.fullscreenElement) {
-        if (docEl.requestFullscreen) {
-          await docEl.requestFullscreen();
-        } else if (docEl.webkitRequestFullscreen) {
-          await docEl.webkitRequestFullscreen();
-        }
-      }
-    } catch {
-      // Mobile Safari / embedded iframes may block fullscreen; continue seamlessly
-    }
-
-    let locked = false;
-    try {
-      const orientation = screen.orientation as ScreenOrientation & {
-        lock?: (orientation: string) => Promise<void>;
+  const enterFullscreenAndLandscape = useCallback(() => {
+    // Non-blocking fire-and-forget so mobile browsers NEVER delay or stall race countdown
+    void (async () => {
+      const docEl = document.documentElement as HTMLElement & {
+        webkitRequestFullscreen?: () => Promise<void> | void;
       };
-      if (orientation && typeof orientation.lock === 'function') {
-        await orientation.lock('landscape');
-        locked = true;
+      try {
+        if (!document.fullscreenElement) {
+          if (docEl.requestFullscreen) {
+            await docEl.requestFullscreen();
+          } else if (docEl.webkitRequestFullscreen) {
+            await docEl.webkitRequestFullscreen();
+          }
+        }
+      } catch {
+        // Mobile Safari / embedded iframes may block fullscreen; continue seamlessly
       }
-    } catch {
-      locked = false;
-    }
 
-    const isMobileViewport =
-      window.matchMedia?.('(pointer: coarse)')?.matches ||
-      /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
-    if (isMobileViewport && !locked && window.innerHeight > window.innerWidth) {
-      setShowRotateHint(true);
-    } else {
-      setShowRotateHint(false);
-    }
+      let locked = false;
+      try {
+        const orientation = screen.orientation as ScreenOrientation & {
+          lock?: (orientation: string) => Promise<void>;
+        };
+        if (orientation && typeof orientation.lock === 'function') {
+          await orientation.lock('landscape');
+          locked = true;
+        }
+      } catch {
+        locked = false;
+      }
+
+      const isMobileViewport =
+        window.matchMedia?.('(pointer: coarse)')?.matches ||
+        /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
+      if (isMobileViewport && !locked && window.innerHeight > window.innerWidth) {
+        setShowRotateHint(true);
+      } else {
+        setShowRotateHint(false);
+      }
+    })();
   }, []);
 
   const launchRace = useCallback(
-    (trackId: TrackId, broadcastStart: boolean) => {
+    (
+      trackId: TrackId,
+      broadcastStart: boolean,
+      overrideMode?: GameMode,
+      overrideWeather?: WeatherMode
+    ) => {
       const engine = engineRef.current;
       const sound = soundRef.current;
       const net = netRef.current;
       if (!engine || !sound || !net || !engineReady) return;
 
+      const activeMode = overrideMode ?? gameModeRef.current;
+      const activeWeather = overrideWeather ?? weatherModeRef.current;
+      const activeBikeId = selectedBikeRef.current;
+      const localCustom = getBikeCustomization(profileRef.current, activeBikeId);
+
+      // Safe audio init & fullscreen attempt (completely non-blocking on mobile!)
       if (broadcastStart) {
-        sound.init();
-        void enterFullscreenAndLandscape();
-        net.sendRaceStart(trackId);
+        try {
+          sound.init();
+        } catch {
+          // Ignore mobile audio restrictions
+        }
+        enterFullscreenAndLandscape();
+        net.sendRaceStart(trackId, activeMode, activeWeather);
       }
 
       if (countdownTimerRef.current) {
@@ -170,7 +236,10 @@ export default function App() {
 
       const activeSlots = net.getSlots();
       resetControls();
-      setStandings([]);
+      setShowGarageModal(false);
+      setShowLeaderboardModal(false);
+      setShowProfileModal(false);
+      setRaceSummary(null);
       setPhase('countdown');
       setCountdownValue(3);
 
@@ -179,6 +248,9 @@ export default function App() {
       engine.startRace(
         trackId,
         activeSlots,
+        activeMode,
+        activeWeather,
+        localCustom,
         () => net.getRemoteUpdates(),
         (id) => {
           const currentSlots = net.getSlots();
@@ -186,16 +258,29 @@ export default function App() {
         }
       );
 
-      sound.playCountdownBeep(false);
+      // Countdown runs 100% independently of Web Audio API so mobile browsers NEVER freeze
+      try {
+        sound.playCountdownBeep(false);
+      } catch {
+        // Ignore suspended audio
+      }
       let count = 3;
       countdownTimerRef.current = window.setInterval(() => {
         count -= 1;
         if (count > 0) {
           setCountdownValue(count);
-          sound.playCountdownBeep(false);
+          try {
+            sound.playCountdownBeep(false);
+          } catch {
+            // Ignore suspended audio
+          }
         } else if (count === 0) {
           setCountdownValue(0);
-          sound.playCountdownBeep(true);
+          try {
+            sound.playCountdownBeep(true);
+          } catch {
+            // Ignore suspended audio
+          }
           engine.beginRacingGo();
           setPhase('racing');
         } else {
@@ -211,7 +296,7 @@ export default function App() {
 
   launchRaceRef.current = launchRace;
 
-  // Initialize Sound, Multiplayer & 3D WebGL Engine asynchronously (no black screen freeze)
+  // Initialize Sound, Multiplayer & 3D WebGL Engine asynchronously
   useEffect(() => {
     const mount = canvasMountRef.current;
     if (!mount) return;
@@ -232,28 +317,47 @@ export default function App() {
       setIsSpeaking(speaking);
       setVoiceError(err);
     };
-    net.onRemoteRaceStart = (remoteTrackId) => {
+    net.onRemoteRaceStart = (remoteTrackId, remoteMode, remoteWeather) => {
       setSelectedTrack(remoteTrackId);
-      launchRaceRef.current(remoteTrackId, false);
+      if (remoteMode) setGameMode(remoteMode);
+      if (remoteWeather) setWeatherMode(remoteWeather);
+      launchRaceRef.current(remoteTrackId, false, remoteMode, remoteWeather);
     };
 
     engine.onHudUpdate = (snapshot) => setHud(snapshot);
-    engine.onRaceFinished = (finalStandings) => {
+    engine.onRaceFinished = (summary) => {
       resetControls();
-      const localResult = finalStandings.find((s) => s.isLocal);
-      if (localResult) {
-        const { updated, coinsEarned } = recordRaceResult(
-          profileRef.current,
-          localResult.rank,
-          localResult.wheelieScore
-        );
-        setProfile(updated);
-        setSavedSession(updated);
-        setLastCoinsEarned(coinsEarned);
-      } else {
-        setLastCoinsEarned(0);
+      const localResult = summary.standings.find((s) => s.isLocal);
+      const rank = localResult?.rank ?? 1;
+      const wheelieScore = localResult?.wheelieScore ?? 0;
+      const completedFullTrack = summary.endReason === 'finished' || summary.endReason === 'knockout_win';
+
+      const reward = recordRaceResult(profileRef.current, {
+        rank,
+        wheelieScore,
+        gameMode: summary.gameMode,
+        elapsedMs: summary.elapsedMs,
+        distanceM: summary.distanceM,
+        topSpeedKmh: summary.topSpeedKmh,
+        coinsCollected: summary.coinsCollected,
+        completedFullTrack,
+      });
+
+      setProfile(reward.updated);
+      setSavedSession(reward.updated);
+      setLastReward({
+        coinsEarned: reward.coinsEarned,
+        wonItem: reward.wonItem,
+        wonItemDuplicateBonus: reward.wonItemDuplicateBonus,
+      });
+      if (reward.wonItem) {
+        try {
+          sound.playRewardCrateOpen();
+        } catch {
+          // Ignore suspended audio
+        }
       }
-      setStandings(finalStandings);
+      setRaceSummary(summary);
       setPhase('finished');
     };
     engine.onNetworkSend = (update) => net.sendRacerUpdate(update);
@@ -261,7 +365,14 @@ export default function App() {
     engine.onInitFailed = (msg) => setInitError(msg);
     engine.setControlsRef(controlsRef);
 
-    net.setLocalProfile(profileRef.current.name, selectedBike, profileRef.current.avatar);
+    const initCustom = getBikeCustomization(profileRef.current, selectedBikeRef.current);
+    net.setLocalProfile(
+      profileRef.current.name,
+      selectedBikeRef.current,
+      profileRef.current.avatar,
+      initCustom.paintId,
+      initCustom.equippedTools.includes('neon_underglow')
+    );
     net.connectRoom(roomCode, true);
 
     void engine
@@ -270,17 +381,22 @@ export default function App() {
         setLoadingLabel(label);
       })
       .then(() => {
-        engine.setGarageSelection(selectedBike, selectedTrack);
+        engine.setGarageSelection(
+          selectedBikeRef.current,
+          selectedTrack,
+          getBikeCustomization(profileRef.current, selectedBikeRef.current)
+        );
         engine.setAutoAccelerate(autoGas);
         setEngineReady(true);
       });
 
-    // Safe one-time user gesture audio unlock for mobile browsers
+    // Silently unlock/resume mobile Web Audio on user interaction without blocking anything
     const unlockAudio = () => {
-      sound.init();
-      window.removeEventListener('pointerdown', unlockAudio);
-      window.removeEventListener('touchstart', unlockAudio);
-      window.removeEventListener('keydown', unlockAudio);
+      try {
+        sound.init();
+      } catch {
+        // Ignore restricted Web Audio
+      }
     };
     window.addEventListener('pointerdown', unlockAudio, { passive: true });
     window.addEventListener('touchstart', unlockAudio, { passive: true });
@@ -313,11 +429,13 @@ export default function App() {
     };
   }, []);
 
-  // Sync Garage preview & Multiplayer profile (name + bike + avatar) on selection change
+  // Sync Garage 3D preview & Multiplayer profile (name + bike + avatar + paint + underglow)
   useEffect(() => {
-    netRef.current?.setLocalProfile(profile.name, selectedBike, profile.avatar);
-    engineRef.current?.setGarageSelection(selectedBike, selectedTrack);
-  }, [profile.name, profile.avatar, selectedBike, selectedTrack]);
+    const custom = getBikeCustomization(profile, selectedBike);
+    const hasUnderglow = custom.equippedTools.includes('neon_underglow');
+    netRef.current?.setLocalProfile(profile.name, selectedBike, profile.avatar, custom.paintId, hasUnderglow);
+    engineRef.current?.setGarageSelection(selectedBike, selectedTrack, custom);
+  }, [profile, selectedBike, selectedTrack]);
 
   // Sync optional toggleable Auto-Gas with engine
   useEffect(() => {
@@ -394,8 +512,10 @@ export default function App() {
     soundRef.current?.playUiClick();
     setProfile(nextProfile);
     setSavedSession(nextProfile);
+    if (!nextProfile.unlockedBikes.includes(selectedBike)) {
+      setSelectedBike(nextProfile.unlockedBikes[0] ?? 'apex');
+    }
     setShowLoginModal(false);
-    netRef.current?.setLocalProfile(nextProfile.name, selectedBike, nextProfile.avatar);
   };
 
   const handleSaveProfile = (updated: UserProfile) => {
@@ -404,7 +524,6 @@ export default function App() {
     const persisted = saveProfile(updated);
     setProfile(persisted);
     setSavedSession(persisted);
-    netRef.current?.setLocalProfile(persisted.name, selectedBike, persisted.avatar);
   };
 
   const handleQuickNameChange = (nextName: string) => {
@@ -426,10 +545,17 @@ export default function App() {
     setShowLoginModal(true);
   };
 
+  const handleCreatePrivateRoom = () => {
+    soundRef.current?.init();
+    soundRef.current?.playUiClick();
+    const nextCode = netRef.current?.createPrivateRoom() ?? String(Math.floor(1000 + Math.random() * 9000));
+    setRoomCode(nextCode);
+  };
+
   const handleJoinRoom = (code: string, asHost: boolean) => {
     soundRef.current?.init();
     soundRef.current?.playUiClick();
-    const clean = code.trim().toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8) || 'GP101';
+    const clean = code.trim().toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8) || '1042';
     setRoomCode(clean);
     netRef.current?.connectRoom(clean, asHost);
   };
@@ -440,10 +566,65 @@ export default function App() {
     setSelectedBike(id);
   };
 
+  const handleUnlockBike = (id: BikeId, useBlueprints = false): string | null => {
+    soundRef.current?.init();
+    const res = unlockBikeInProfile(profileRef.current, id, useBlueprints);
+    if (!res.success) {
+      return res.message ?? 'Cannot unlock this bike yet.';
+    }
+    soundRef.current?.playRewardCrateOpen();
+    setProfile(res.updated);
+    setSavedSession(res.updated);
+    return null;
+  };
+
+  const handleSelectPaint = (bikeId: BikeId, paintId: PaintColorId) => {
+    soundRef.current?.init();
+    soundRef.current?.playUiClick();
+    const updated = setBikePaintInProfile(profileRef.current, bikeId, paintId);
+    setProfile(updated);
+    setSavedSession(updated);
+  };
+
+  const handleUpgradeStat = (
+    bikeId: BikeId,
+    stat: 'engine' | 'handling' | 'nitro'
+  ): string | null => {
+    soundRef.current?.init();
+    const res = upgradeBikeStatInProfile(profileRef.current, bikeId, stat);
+    if (!res.success) {
+      return res.message ?? 'Cannot upgrade right now.';
+    }
+    soundRef.current?.playPowerUpPickup();
+    setProfile(res.updated);
+    setSavedSession(res.updated);
+    return null;
+  };
+
+  const handleToggleTool = (bikeId: BikeId, toolId: RewardItemId) => {
+    soundRef.current?.init();
+    soundRef.current?.playUiClick();
+    const updated = toggleToolEquipInProfile(profileRef.current, bikeId, toolId);
+    setProfile(updated);
+    setSavedSession(updated);
+  };
+
   const handleSelectTrack = (id: TrackId) => {
     soundRef.current?.init();
     soundRef.current?.playUiClick();
     setSelectedTrack(id);
+  };
+
+  const handleSelectGameMode = (mode: GameMode) => {
+    soundRef.current?.init();
+    soundRef.current?.playUiClick();
+    setGameMode(mode);
+  };
+
+  const handleSelectWeatherMode = (weather: WeatherMode) => {
+    soundRef.current?.init();
+    soundRef.current?.playUiClick();
+    setWeatherMode(weather);
   };
 
   const handleToggleMasterAudio = () => {
@@ -468,7 +649,11 @@ export default function App() {
     setCameraMode(engineRef.current.cycleCamera());
   };
 
-  const handleExitToGarage = () => {
+  const handleFinishEndlessNow = () => {
+    engineRef.current?.finishCurrentRunNow();
+  };
+
+  const handleExitToGarage = (openGarageImmediately = false) => {
     if (countdownTimerRef.current) {
       window.clearInterval(countdownTimerRef.current);
       countdownTimerRef.current = null;
@@ -486,11 +671,14 @@ export default function App() {
     engineRef.current?.returnToGarage();
     setHud(null);
     setPhase('lobby');
+    if (openGarageImmediately) {
+      setShowGarageModal(true);
+    }
   };
 
   return (
     <div className="relative h-screen h-dvh w-screen overflow-hidden bg-[#070a12]">
-      {/* Dedicated Isolated WebGL Canvas Container (pointer-events-none so HUD never gets blocked) */}
+      {/* Dedicated Isolated WebGL Canvas Container */}
       <div ref={canvasMountRef} className="pointer-events-none absolute inset-0 h-full w-full" />
 
       {/* Lightweight Loading Progress Indicator before 3D Scene Starts */}
@@ -550,7 +738,8 @@ export default function App() {
         </div>
       )}
 
-      {phase === 'lobby' && engineReady && (
+      {/* Main Lobby (hidden while Full Garage Modal is docked open so 3D turntable shines) */}
+      {phase === 'lobby' && engineReady && !showGarageModal && (
         <GarageLobby
           profile={profile}
           onOpenProfile={() => {
@@ -558,13 +747,28 @@ export default function App() {
             soundRef.current?.playUiClick();
             setShowProfileModal(true);
           }}
+          onOpenGarage={() => {
+            soundRef.current?.init();
+            soundRef.current?.playUiClick();
+            setShowGarageModal(true);
+          }}
+          onOpenLeaderboard={() => {
+            soundRef.current?.init();
+            soundRef.current?.playUiClick();
+            setShowLeaderboardModal(true);
+          }}
           playerName={profile.name}
           onPlayerNameChange={handleQuickNameChange}
           selectedBike={selectedBike}
           onSelectBike={handleSelectBike}
           selectedTrack={selectedTrack}
           onSelectTrack={handleSelectTrack}
+          gameMode={gameMode}
+          onSelectGameMode={handleSelectGameMode}
+          weatherMode={weatherMode}
+          onSelectWeatherMode={handleSelectWeatherMode}
           roomCode={roomCode}
+          onCreatePrivateRoom={handleCreatePrivateRoom}
           onJoinRoom={handleJoinRoom}
           slots={slots}
           connectionStatus={connectionStatus}
@@ -580,6 +784,35 @@ export default function App() {
         />
       )}
 
+      {/* Full Superbike Garage, Paint & Upgrade Workshop Modal */}
+      {phase === 'lobby' && engineReady && showGarageModal && !showLoginModal && (
+        <GarageModal
+          profile={profile}
+          selectedBike={selectedBike}
+          onSelectBike={handleSelectBike}
+          onUnlockBike={handleUnlockBike}
+          onSelectPaint={handleSelectPaint}
+          onUpgradeStat={handleUpgradeStat}
+          onToggleTool={handleToggleTool}
+          onClose={() => {
+            soundRef.current?.playUiClick();
+            setShowGarageModal(false);
+          }}
+        />
+      )}
+
+      {/* Global Leaderboard Modal */}
+      {phase === 'lobby' && engineReady && showLeaderboardModal && !showLoginModal && (
+        <LeaderboardModal
+          entries={getGlobalLeaderboard(profile)}
+          onClose={() => {
+            soundRef.current?.playUiClick();
+            setShowLeaderboardModal(false);
+          }}
+        />
+      )}
+
+      {/* In-Race HUD & Mobile Touch Controls */}
       {(phase === 'countdown' || phase === 'racing') && (
         <RaceHud
           phase={phase}
@@ -599,19 +832,26 @@ export default function App() {
           autoGas={autoGas}
           onToggleAutoGas={() => setAutoGas((v) => !v)}
           controlsRef={controlsRef}
-          onExitRace={handleExitToGarage}
+          onFinishEndlessNow={handleFinishEndlessNow}
+          onExitRace={() => handleExitToGarage(false)}
           showRotateHint={showRotateHint}
           onDismissRotateHint={() => setShowRotateHint(false)}
         />
       )}
 
-      {phase === 'finished' && (
+      {/* Victory Reward Crate, Podium Standings & Shareable Scorecard Modal */}
+      {phase === 'finished' && raceSummary && (
         <PodiumModal
-          trackId={selectedTrack}
-          standings={standings}
-          coinsEarned={lastCoinsEarned}
+          summary={raceSummary}
+          playerName={profile.name}
+          playerAvatar={profile.avatar}
+          bikeId={selectedBike}
+          coinsEarned={lastReward.coinsEarned}
+          wonItem={lastReward.wonItem}
+          wonItemDuplicateBonus={lastReward.wonItemDuplicateBonus}
+          onOpenGarage={() => handleExitToGarage(true)}
           onPlayAgain={() => launchRace(selectedTrack, true)}
-          onChangeTrack={handleExitToGarage}
+          onChangeTrack={() => handleExitToGarage(false)}
         />
       )}
 
