@@ -13,10 +13,10 @@ import {
   WeatherMode,
 } from '../types/game';
 
-// 17.6 km curved & elevated circuit (~4 to 5 minutes at racing speeds through sharp bends & traffic)
-export const RACE_DISTANCE = 17600;
-export const CHECKPOINT_INTERVAL = 1600; // Time Trial checkpoint every 1.6 km
-export const KNOCKOUT_INTERVAL_SEC = 45; // Last racer eliminated every 45 seconds
+// 10.8 km curved & elevated circuit (~3 minutes / 180s at normal racing speed)
+export const RACE_DISTANCE = 10800;
+export const CHECKPOINT_INTERVAL = 1200; // Time Trial checkpoint every 1.2 km
+export const KNOCKOUT_INTERVAL_SEC = 35; // Last racer eliminated every 35 seconds
 
 export const UPGRADE_COSTS = [160, 320, 520, 820, 1250];
 export const MAX_UPGRADE_LEVEL = 5;
@@ -199,7 +199,7 @@ export const BIKES: Record<BikeId, BikeSpec> = {
   phantom: {
     id: 'phantom',
     name: 'Phantom GT',
-    tagline: 'Endurance carbon hyperbike built for relentless 4-minute sprints',
+    tagline: 'Endurance carbon hyperbike built for relentless 3-minute sprints',
     bodyStyle: 'gt',
     unlockCost: 1100,
     defaultPaint: 'white',
@@ -350,20 +350,20 @@ export const GAME_MODE_LIST: Array<{
   {
     id: 'standard',
     name: 'Standard Race',
-    shortDesc: 'Full 17.6 km (4-5 min) curved circuit vs 4 racers',
-    badge: '4-5 Min',
+    shortDesc: 'Full 10.8 km (~3 min) curved circuit vs 4 racers',
+    badge: '~3 Min',
   },
   {
     id: 'timetrial',
     name: 'Time Trial',
-    shortDesc: 'Beat every checkpoint timer across the curved track',
+    shortDesc: 'Beat every 1.2 km checkpoint timer to the finish',
     badge: 'Checkpoints',
   },
   {
     id: 'knockout',
     name: 'Knockout',
-    shortDesc: 'Last racer eliminated every 45s until 1 winner survives',
-    badge: '45s Elim',
+    shortDesc: 'Last racer eliminated every 35s until 1 winner survives',
+    badge: '35s Elim',
   },
   {
     id: 'endless',

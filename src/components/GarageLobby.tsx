@@ -421,7 +421,7 @@ export const GarageLobby: React.FC<GarageLobbyProps> = ({
                 Select Circuit
               </h2>
               <span className="text-[11px] text-slate-400">
-                {gameMode === 'endless' ? 'Infinite Highway' : '17.6 km · 4-5 Min Curves'}
+                {gameMode === 'endless' ? 'Infinite Highway' : '10.8 km · ~3 Min Curves'}
               </span>
             </div>
 

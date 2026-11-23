@@ -329,6 +329,79 @@ export const RaceHud: React.FC<RaceHudProps> = ({
               </button>
             </div>
           )}
+
+          {/* Always-Visible Mobile Vertical Mini-Map (Top-Right, clear above Bottom-Right Touch Controls) */}
+          {phase !== 'lobby' && (
+            <div
+              style={{ zIndex: 9998 }}
+              className="pointer-events-none fixed right-2 top-[50px] flex w-[64px] flex-col items-center rounded-xl border border-white/15 bg-[#090d17]/86 px-1.5 py-1.5 shadow-lg"
+            >
+              <div className="font-mono-num text-[10px] font-extrabold leading-none text-amber-400">
+                {gameMode === 'endless' ? 'ENDLESS' : `${progressPct}%`}
+              </div>
+              <div className="font-mono-num mt-0.5 text-center text-[9px] font-semibold leading-tight text-slate-200 whitespace-nowrap">
+                {remainingLabel}
+              </div>
+
+              <div className="mt-1 flex items-center gap-0.5 text-[8px] font-bold uppercase tracking-wider text-emerald-300">
+                <Flag className="h-2.5 w-2.5" />
+                <span>FIN</span>
+              </div>
+
+              <div className="relative my-1 h-[78px] w-2 rounded-full bg-slate-800/95 sm:h-[104px]">
+                <div
+                  className="absolute bottom-0 left-0 right-0 rounded-full bg-amber-500/50"
+                  style={{ height: `${Math.max(0, Math.min(100, (hud?.progress ?? 0) * 100))}%` }}
+                />
+                <div className="absolute -top-0.5 left-1/2 h-1 w-4 -translate-x-1/2 rounded-sm bg-white/90" />
+
+                {/* Colored real-time dots for all opponent / AI racers */}
+                {hud?.standings.map((s, idx) => {
+                  if (s.isLocal || s.eliminated) return null;
+                  const pct =
+                    gameMode === 'endless'
+                      ? ((s.distanceZ % 2000) / 2000) * 100
+                      : Math.max(0, Math.min(100, (s.distanceZ / RACE_DISTANCE) * 100));
+                  const dotColors = ['#38bdf8', '#a855f7', '#22c55e', '#fb7185', '#f472b6'];
+                  return (
+                    <div
+                      key={s.id}
+                      style={{
+                        bottom: `${pct}%`,
+                        backgroundColor: dotColors[idx % dotColors.length],
+                      }}
+                      className="absolute left-1/2 h-2.5 w-2.5 -translate-x-1/2 translate-y-1/2 rounded-full border border-slate-950"
+                    />
+                  );
+                })}
+
+                {/* Police interceptor dot */}
+                {hud?.police.active && (
+                  <div
+                    style={{
+                      bottom: `${Math.max(0, Math.min(100, hud.police.progress * 100))}%`,
+                      backgroundColor: policeRedPhase ? '#ef4444' : '#3b82f6',
+                    }}
+                    className="absolute left-1/2 z-10 h-2.5 w-2.5 -translate-x-1/2 translate-y-1/2 rounded-full border border-white"
+                  />
+                )}
+
+                {/* Local player amber arrow marker */}
+                <div
+                  style={{
+                    bottom: `${Math.max(0, Math.min(100, (hud?.progress ?? 0) * 100))}%`,
+                  }}
+                  className="absolute left-1/2 z-20 flex h-3.5 w-3.5 -translate-x-1/2 translate-y-1/2 items-center justify-center rounded-full border border-white bg-amber-400 text-slate-950"
+                >
+                  <ChevronUp className="h-2.5 w-2.5 stroke-[3]" />
+                </div>
+              </div>
+
+              <div className="text-[8px] font-semibold uppercase tracking-wider text-slate-500">
+                START
+              </div>
+            </div>
+          )}
         </div>
       ) : (
         /* ============================================================
@@ -509,15 +582,19 @@ export const RaceHud: React.FC<RaceHudProps> = ({
                 />
                 <div className="absolute -top-0.5 left-1/2 h-1 w-4 -translate-x-1/2 rounded-sm bg-white/85" />
 
-                {hud?.standings.map((s) => {
+                {hud?.standings.map((s, idx) => {
                   if (s.isLocal || s.eliminated) return null;
                   const pct = Math.max(0, Math.min(100, (s.distanceZ / RACE_DISTANCE) * 100));
+                  const dotColors = ['#38bdf8', '#a855f7', '#22c55e', '#fb7185', '#f472b6'];
                   return (
                     <div
                       key={s.id}
                       title={s.name}
-                      style={{ bottom: `${pct}%` }}
-                      className="absolute left-1/2 h-2.5 w-2.5 -translate-x-1/2 translate-y-1/2 rounded-full border border-slate-950 bg-cyan-400"
+                      style={{
+                        bottom: `${pct}%`,
+                        backgroundColor: dotColors[idx % dotColors.length],
+                      }}
+                      className="absolute left-1/2 h-2.5 w-2.5 -translate-x-1/2 translate-y-1/2 rounded-full border border-slate-950"
                     />
                   );
                 })}

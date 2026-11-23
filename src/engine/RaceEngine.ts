@@ -102,6 +102,7 @@ interface RacerActor {
   y: number;
   vy: number;
   speedMs: number;
+  steerSmooth: number;
   leanAngle: number;
   wheeliePitch: number;
   wheelRot: number;
@@ -191,8 +192,10 @@ export class RaceEngine {
   private sound: SoundEngine;
   private isSoftwareGl = false;
   private isMobile = false;
+  private touchTuningEnabled = false;
   private autoAccelerate = false;
   private initialized = false;
+  private lastSparkMs = 0;
 
   private renderer: THREE.WebGLRenderer | null = null;
   private scene!: THREE.Scene;
@@ -329,7 +332,7 @@ export class RaceEngine {
       typeof window !== 'undefined' &&
       (window.matchMedia?.('(pointer: coarse)')?.matches ||
         /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent));
-    this.rainCount = this.isMobile ? 140 : 320;
+    this.rainCount = this.isMobile ? 110 : 190;
   }
 
   private yieldFrame(ms = 16): Promise<void> {
@@ -366,6 +369,10 @@ export class RaceEngine {
 
   public setAutoAccelerate(enabled: boolean): void {
     this.autoAccelerate = enabled;
+  }
+
+  public setTouchMode(enabled: boolean): void {
+    this.touchTuningEnabled = enabled;
   }
 
   public setControlsRef(ref: { current: ControlInputs }): void {
@@ -494,6 +501,8 @@ export class RaceEngine {
 
     this.sunLight = new THREE.DirectionalLight(0xffe8c2, 2.15);
     this.sunLight.position.set(28, 46, 18);
+    this.sunLight.castShadow = false;
+    this.sunLight.shadow.mapSize.set(512, 512);
     scene.add(this.sunLight);
     scene.add(this.sunLight.target);
 
@@ -617,6 +626,7 @@ export class RaceEngine {
     if (bikeChanged) {
       if (this.garageBikeRig) {
         this.garageGroup.remove(this.garageBikeRig.root);
+        this.disposeObject3D(this.garageBikeRig.root);
       }
       this.garageBikeRig = createSuperbikeGroup(bikeId, this.contactShadowTex, {
         paintId: custom.paintId,
@@ -860,6 +870,44 @@ export class RaceEngine {
     this.sound.setEngineActive(true);
   }
 
+  private disposeObject3D(root: THREE.Object3D): void {
+    const sharedTextures = new Set<THREE.Texture | undefined>([
+      this.contactShadowTex,
+      this.facadeTex,
+      this.lampPoolTex,
+      this.breakerTex,
+      this.finishTex,
+      this.checkpointTex,
+      this.chevronLeftTex,
+      this.chevronRightTex,
+      this.boostPadTex,
+      this.rampTex,
+      this.envMap,
+    ]);
+    const disposedGeos = new Set<THREE.BufferGeometry>();
+    const disposedMats = new Set<THREE.Material>();
+
+    root.traverse((obj) => {
+      const mesh = obj as THREE.Mesh;
+      if (mesh.geometry && !disposedGeos.has(mesh.geometry)) {
+        disposedGeos.add(mesh.geometry);
+        mesh.geometry.dispose();
+      }
+      if (mesh.material) {
+        const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+        for (const m of mats) {
+          if (disposedMats.has(m)) continue;
+          disposedMats.add(m);
+          const std = m as THREE.MeshStandardMaterial;
+          if (std.map && !sharedTextures.has(std.map)) {
+            std.map.dispose();
+          }
+          m.dispose();
+        }
+      }
+    });
+  }
+
   private clearRaceWorld(): void {
     for (const tex of this.roadTextures) tex.dispose();
     this.roadTextures = [];
@@ -879,7 +927,9 @@ export class RaceEngine {
       this.propPool = null;
     }
     while (this.raceGroup.children.length > 0) {
-      this.raceGroup.remove(this.raceGroup.children[0]);
+      const child = this.raceGroup.children[0];
+      this.raceGroup.remove(child);
+      this.disposeObject3D(child);
     }
     this.speedBreakers = [];
     this.chevronLeftPool = [];
@@ -1224,9 +1274,9 @@ export class RaceEngine {
       });
     }
 
-    // 11. Checkered Finish Line Arch (hidden in Endless Highway mode)
+    // 11. Grand Prix Checkered Finish Line Arch & Road Strip (hidden in Endless Highway mode)
     if (this.gameMode !== 'endless') {
-      this.finishArch = this.createBannerArch(this.finishTex);
+      this.finishArch = this.createBannerArch(this.finishTex, true);
       const fX = getTrackCenterX(RACE_DISTANCE, trackId);
       const fY = getTrackElevationY(RACE_DISTANCE, trackId);
       const fYaw = getTrackYaw(RACE_DISTANCE, trackId);
@@ -1237,29 +1287,72 @@ export class RaceEngine {
 
     // 12. Time Trial Checkpoint Arch (recycles every CHECKPOINT_INTERVAL)
     if (this.gameMode === 'timetrial') {
-      this.checkpointArch = this.createBannerArch(this.checkpointTex);
+      this.checkpointArch = this.createBannerArch(this.checkpointTex, false);
       this.positionCheckpointArch(CHECKPOINT_INTERVAL);
       this.raceGroup.add(this.checkpointArch);
     }
   }
 
-  private createBannerArch(bannerTex: THREE.Texture): THREE.Group {
+  private createBannerArch(bannerTex: THREE.Texture, isFinishLine: boolean): THREE.Group {
     const g = new THREE.Group();
+    const towerHeight = isFinishLine ? 8.6 : 7.4;
     const pillarMat = new THREE.MeshStandardMaterial({
-      color: 0x1e293b,
-      metalness: 0.75,
-      roughness: 0.3,
+      color: isFinishLine ? 0xf8fafc : 0x1e293b,
+      metalness: 0.65,
+      roughness: 0.28,
     });
-    const pL = new THREE.Mesh(new THREE.BoxGeometry(0.6, 7.2, 0.6), pillarMat);
-    pL.position.set(-7.6, 3.6, 0);
+    const pL = new THREE.Mesh(new THREE.BoxGeometry(0.85, towerHeight, 0.85), pillarMat);
+    pL.position.set(-7.8, towerHeight * 0.5, 0);
     const pR = pL.clone();
-    pR.position.x = 7.6;
+    pR.position.x = 7.8;
     g.add(pL, pR);
 
+    // High-contrast racing accent bands on the towers
+    const bandMat = new THREE.MeshBasicMaterial({
+      color: isFinishLine ? 0xef4444 : 0x06b6d4,
+    });
+    const bandGeo = new THREE.BoxGeometry(0.92, 0.9, 0.92);
+    for (const h of [1.8, 4.2, 6.6]) {
+      if (h < towerHeight - 0.5) {
+        const bL = new THREE.Mesh(bandGeo, bandMat);
+        bL.position.set(-7.8, h, 0);
+        const bR = new THREE.Mesh(bandGeo, bandMat);
+        bR.position.set(7.8, h, 0);
+        g.add(bL, bR);
+      }
+    }
+
+    // Glowing overhead checkered banner (MeshBasicMaterial so always unmistakable day or night)
     const bannerMat = new THREE.MeshBasicMaterial({ map: bannerTex });
-    const banner = new THREE.Mesh(new THREE.BoxGeometry(15.6, 2.2, 0.4), bannerMat);
-    banner.position.set(0, 6.4, 0);
+    const banner = new THREE.Mesh(
+      new THREE.BoxGeometry(16.6, isFinishLine ? 2.55 : 2.15, 0.45),
+      bannerMat
+    );
+    banner.position.set(0, towerHeight - 1.15, 0);
     g.add(banner);
+
+    if (isFinishLine) {
+      // Glowing emerald/amber gantry beacons atop each tower (no PointLight lag)
+      const beaconGeo = new THREE.BoxGeometry(1.1, 0.42, 1.1);
+      const beaconMat = new THREE.MeshBasicMaterial({ color: 0xfbbf24 });
+      const topL = new THREE.Mesh(beaconGeo, beaconMat);
+      topL.position.set(-7.8, towerHeight + 0.25, 0);
+      const topR = new THREE.Mesh(beaconGeo, beaconMat);
+      topR.position.set(7.8, towerHeight + 0.25, 0);
+      g.add(topL, topR);
+
+      // Painted checkered tarmac finish line directly on the road surface
+      const stripGeo = new THREE.PlaneGeometry(ROAD_HALF_WIDTH * 2 + 0.4, 3.2);
+      const stripMat = new THREE.MeshBasicMaterial({
+        map: bannerTex,
+        side: THREE.DoubleSide,
+      });
+      const roadStrip = new THREE.Mesh(stripGeo, stripMat);
+      roadStrip.rotation.x = -Math.PI / 2;
+      roadStrip.position.set(0, 0.08, 0);
+      g.add(roadStrip);
+    }
+
     return g;
   }
 
@@ -1321,6 +1414,7 @@ export class RaceEngine {
         y: getRoadSurfaceY(startLat, startZ, this.currentTrackId),
         vy: 0,
         speedMs: 0,
+        steerSmooth: 0,
         leanAngle: 0,
         wheeliePitch: 0,
         wheelRot: 0,
@@ -1414,6 +1508,9 @@ export class RaceEngine {
   }
 
   private spawnSparks(worldX: number, worldY: number, worldZ: number): void {
+    const now = performance.now();
+    if (now - this.lastSparkMs < 120) return;
+    this.lastSparkMs = now;
     for (let i = 0; i < this.sparkPool.length; i++) {
       const sp = this.sparkPool[i];
       sp.mesh.visible = true;
@@ -1606,7 +1703,7 @@ export class RaceEngine {
     }
 
     this.hudSyncAccum += dt;
-    if (this.hudSyncAccum >= 0.042) {
+    if (this.hudSyncAccum >= 0.05) {
       this.hudSyncAccum = 0;
       this.emitHudSnapshot();
     }
@@ -1614,9 +1711,9 @@ export class RaceEngine {
 
   private updateDynamicWeather(): void {
     if (this.weatherMode !== 'dynamic') return;
-    // Cycle every 60 seconds through Day -> Foggy -> Night -> Rainy across the 4-5 min race
+    // Cycle every 45 seconds through Day -> Foggy -> Night -> Rainy across the 3-minute race
     const cycle: ActiveWeather[] = ['day', 'foggy', 'night', 'rainy'];
-    const idx = Math.floor(this.elapsedMs / 60000) % cycle.length;
+    const idx = Math.floor(this.elapsedMs / 45000) % cycle.length;
     const next = cycle[idx];
     if (next !== this.activeWeather) {
       this.applyTrackAtmosphere(this.currentTrackId, next, false);
@@ -1708,8 +1805,11 @@ export class RaceEngine {
     if (this.garageBikeRig) {
       this.garageBikeRig.root.rotation.y = this.garageAngle;
     }
-    this.camera.fov = THREE.MathUtils.damp(this.camera.fov, 44, 5, dt);
-    this.camera.updateProjectionMatrix();
+    const nextFov = THREE.MathUtils.damp(this.camera.fov, 44, 5, dt);
+    if (Math.abs(nextFov - this.camera.fov) > 0.015) {
+      this.camera.fov = nextFov;
+      this.camera.updateProjectionMatrix();
+    }
     this.camera.position.set(0.24, 1.38, 3.25);
     this.camera.lookAt(0, 0.72, 0);
     this.sunLight.position.set(5, 8, 5);
@@ -1775,27 +1875,33 @@ export class RaceEngine {
       r.nitro = Math.max(0, r.nitro - phys.nitroBurnRate * dt);
     }
 
+    const mobileTuning = this.isMobile || this.touchTuningEnabled;
+    // Mobile devices get a 32% top-speed & 34% acceleration reduction for realistic, controllable racing
+    const speedScale = mobileTuning ? 0.68 : 1.0;
+    const accelScale = mobileTuning ? 0.66 : 1.0;
+    const nitroBonusScale = mobileTuning ? 0.7 : 1.0;
+
     const onFootpath = Math.abs(r.lateralX) > ROAD_HALF_WIDTH + 0.1;
     const rainGripPenalty = this.activeWeather === 'rainy' ? 0.94 : 1.0;
     const slope = getTrackPitch(r.z, this.currentTrackId); // uphill slows slightly, downhill speeds up
-    const slopeAccel = -Math.sin(slope) * 8.5;
+    const slopeAccel = -Math.sin(slope) * (mobileTuning ? 6.0 : 8.5);
 
     const maxSpeed =
-      (phys.maxSpeedMs + (r.isNitro ? phys.nitroBonusMs : 0)) *
+      (phys.maxSpeedMs * speedScale + (r.isNitro ? phys.nitroBonusMs * nitroBonusScale : 0)) *
       (onFootpath ? 0.87 : 1.0);
 
     const wantsThrottle =
       ctrl.accelerate || (this.autoAccelerate && !ctrl.brake) || r.isNitro;
 
     if (ctrl.brake) {
-      r.speedMs -= 46 * dt;
+      r.speedMs -= (mobileTuning ? 36 : 46) * dt;
     } else if (wantsThrottle) {
-      const boostFactor = r.isNitro ? 1.55 : 1.0;
-      r.speedMs += (phys.accelMs2 * boostFactor + slopeAccel) * dt;
+      const boostFactor = r.isNitro ? 1.5 : 1.0;
+      r.speedMs += (phys.accelMs2 * accelScale * boostFactor + slopeAccel) * dt;
     } else {
       r.speedMs -= (3.6 + r.speedMs * 0.08 - slopeAccel * 0.5) * dt;
     }
-    r.speedMs = THREE.MathUtils.clamp(r.speedMs, -6, maxSpeed + 18); // +18 headroom for boost pads
+    r.speedMs = THREE.MathUtils.clamp(r.speedMs, -6, maxSpeed + (mobileTuning ? 13 : 18));
 
     // Smoothly bleed excess speed above maxSpeed after boost pads / ramps
     if (r.speedMs > maxSpeed) {
@@ -1809,37 +1915,44 @@ export class RaceEngine {
 
     r.rig.brakeLightMat.emissiveIntensity = ctrl.brake ? 5.2 : this.activeWeather === 'night' ? 3.2 : 1.6;
 
-    // Responsive Steering + Realistic Cornering Centrifugal Drift (countered by Handling & Slick Tires!)
+    // Frame-rate-independent smooth steering + cornering centrifugal drift (tuned for smooth sharp turns on mobile)
     let steerDir = 0;
     if (ctrl.left) steerDir += 1;
     if (ctrl.right) steerDir -= 1;
 
-    const speedSteerFactor = Math.min(1, Math.abs(r.speedMs) / 12);
+    r.steerSmooth = THREE.MathUtils.damp(r.steerSmooth, steerDir, mobileTuning ? 6.8 : 13.5, dt);
+
+    const speedSteerFactor = Math.min(1, Math.abs(r.speedMs) / 10);
     const curvature = getTrackCurvature(r.z, this.currentTrackId);
     const effectiveGrip = phys.gripFactor * rainGripPenalty;
+    const driftFactor = mobileTuning ? 0.025 : 0.04;
     const centrifugalPush =
-      -curvature * (r.speedMs * r.speedMs) * (0.042 / Math.max(0.7, effectiveGrip));
+      -curvature * (r.speedMs * r.speedMs) * (driftFactor / Math.max(0.7, effectiveGrip));
 
-    const targetLatV = steerDir * phys.steerSpeed * speedSteerFactor + THREE.MathUtils.clamp(centrifugalPush, -6.5, 6.5);
-    r.lateralVx = THREE.MathUtils.damp(r.lateralVx, targetLatV, 9.8, dt);
+    const steerRate = phys.steerSpeed * (mobileTuning ? 0.74 : 1.0);
+    const targetLatV =
+      r.steerSmooth * steerRate * speedSteerFactor +
+      THREE.MathUtils.clamp(centrifugalPush, mobileTuning ? -4.2 : -6.5, mobileTuning ? 4.2 : 6.5);
+    r.lateralVx = THREE.MathUtils.damp(r.lateralVx, targetLatV, mobileTuning ? 7.8 : 10.2, dt);
     r.lateralX += r.lateralVx * dt;
 
-    // Curved Roadside Barrier collision
+    // Curved Roadside Barrier collision (strict delta-time speed decay so 60Hz/144Hz/240Hz PC behave identically)
+    const barrierDecay = Math.exp(-1.55 * (1 - phys.crashMitigation) * dt);
     if (r.lateralX > FOOTPATH_OUTER_X) {
       r.lateralX = FOOTPATH_OUTER_X;
       if (r.lateralVx > 0) r.lateralVx = -r.lateralVx * 0.35;
       if (this.shieldSec <= 0) {
-        r.speedMs *= 1 - 0.025 * (1 - phys.crashMitigation);
+        r.speedMs *= barrierDecay;
       }
     } else if (r.lateralX < -FOOTPATH_OUTER_X) {
       r.lateralX = -FOOTPATH_OUTER_X;
       if (r.lateralVx < 0) r.lateralVx = -r.lateralVx * 0.35;
       if (this.shieldSec <= 0) {
-        r.speedMs *= 1 - 0.025 * (1 - phys.crashMitigation);
+        r.speedMs *= barrierDecay;
       }
     }
 
-    const targetLean = -steerDir * 0.48 * speedSteerFactor;
+    const targetLean = -r.steerSmooth * 0.48 * speedSteerFactor;
     r.leanAngle = THREE.MathUtils.damp(r.leanAngle, targetLean, 9.2, dt);
 
     const canWheelie = ctrl.wheelie && r.speedMs > 10 && !r.airborneFromRamp;
@@ -1876,7 +1989,7 @@ export class RaceEngine {
       if (r.airborneFromRamp && r.vy < -3) {
         // Landing speed boost from 3D Jump Ramp!
         r.airborneFromRamp = false;
-        r.speedMs = Math.min(phys.maxSpeedMs + phys.nitroBonusMs + 16, r.speedMs + 14);
+        r.speedMs = Math.min(maxSpeed + 14, r.speedMs + (mobileTuning ? 10 : 14));
         this.boostPadFlash = 0.85;
         this.sound.playBoostPad();
         this.showNotice('STUNT LANDING BOOST!', 1.8);
@@ -1891,9 +2004,9 @@ export class RaceEngine {
     this.nitroFlash = Math.max(0, this.nitroFlash - dt * 3.2);
     this.boostPadFlash = Math.max(0, this.boostPadFlash - dt * 2.8);
 
-    // Finish line check (Standard, Time Trial, Knockout)
+    // Finish line crossing check (Standard, Time Trial, Knockout)
     if (this.gameMode !== 'endless' && r.z >= RACE_DISTANCE && r.finishTimeMs === null) {
-      r.finishTimeMs = nowMs - this.raceStartTimeMs;
+      r.finishTimeMs = this.elapsedMs;
       this.concludeRace('finished');
     }
   }
@@ -1916,11 +2029,14 @@ export class RaceEngine {
       for (const other of this.racers) {
         if (other.finishTimeMs === null && !other.eliminated) {
           const remaining = Math.max(5, RACE_DISTANCE - other.z);
-          const estSpeed = Math.max(38, other.speedMs);
+          const estSpeed = Math.max(32, other.speedMs);
           other.finishTimeMs = baseTime + (remaining / estSpeed) * 1000;
         }
       }
     }
+
+    // Push final stopped-timer HUD snapshot before opening scorecard
+    this.emitHudSnapshot();
 
     this.onRaceFinished?.({
       standings: this.computeStandings(),
@@ -1942,15 +2058,19 @@ export class RaceEngine {
       return;
     }
 
+    const mobileTuning = this.isMobile || this.touchTuningEnabled;
+    const hasRemoteHumans = this.racers.some((x) => x.isHuman && !x.isLocal);
+    const aiPaceScale = mobileTuning && !hasRemoteHumans ? 0.69 : 1.0;
+
     const spec = BIKES[r.bikeId];
-    let targetSpeed = spec.physics.maxSpeedMs * r.skill;
+    let targetSpeed = spec.physics.maxSpeedMs * r.skill * aiPaceScale;
 
     if (r.crashTimer > 0) {
       r.crashTimer = Math.max(0, r.crashTimer - dt);
       targetSpeed *= 0.48;
     } else if (this.localRacer && this.phase === 'racing') {
       const gap = r.z - this.localRacer.z;
-      if (gap < -65) targetSpeed *= 1.15;
+      if (gap < -65) targetSpeed *= 1.14;
       else if (gap > 75) targetSpeed *= 0.9;
     }
 
@@ -2443,7 +2563,8 @@ export class RaceEngine {
     const playerLat = this.localRacer.lateralX;
     const gap = playerZ - this.policeZ;
 
-    const desiredSpeed = gap > 22 ? 82 : gap > 9 ? 72 : 62;
+    const policeScale = this.isMobile || this.touchTuningEnabled ? 0.68 : 1.0;
+    const desiredSpeed = (gap > 22 ? 82 : gap > 9 ? 72 : 62) * policeScale;
     this.policeSpeedMs = THREE.MathUtils.damp(this.policeSpeedMs, desiredSpeed, 2.2, dt);
     this.policeZ += this.policeSpeedMs * dt;
 
@@ -2545,8 +2666,10 @@ export class RaceEngine {
 
       const targetFov = 78 + (r.isNitro ? 12 : (r.speedMs / 85) * 6);
       this.camFov = THREE.MathUtils.damp(this.camFov, targetFov, 7, dt);
-      this.camera.fov = this.camFov;
-      this.camera.updateProjectionMatrix();
+      if (Math.abs(this.camera.fov - this.camFov) > 0.015) {
+        this.camera.fov = this.camFov;
+        this.camera.updateProjectionMatrix();
+      }
       this.skyDome.position.copy(this.camera.position);
       return;
     }
@@ -2625,8 +2748,10 @@ export class RaceEngine {
 
     const targetFov = baseFov + (r.speedMs / 85) * 6.0 + (r.isNitro ? 12.5 : 0);
     this.camFov = THREE.MathUtils.damp(this.camFov, targetFov, 7.5, dt);
-    this.camera.fov = this.camFov;
-    this.camera.updateProjectionMatrix();
+    if (Math.abs(this.camera.fov - this.camFov) > 0.015) {
+      this.camera.fov = this.camFov;
+      this.camera.updateProjectionMatrix();
+    }
 
     this.skyDome.position.copy(this.camera.position);
   }
@@ -2766,9 +2891,18 @@ export class RaceEngine {
     document.removeEventListener('fullscreenchange', this.handleOrientationResize);
     window.visualViewport?.removeEventListener('resize', this.handleResize);
     this.clearRaceWorld();
+    this.disposeObject3D(this.garageGroup);
+    if (this.policeRig) this.disposeObject3D(this.policeRig.root);
+    for (const sp of this.sparkPool) {
+      this.disposeObject3D(sp.mesh);
+    }
+    this.sparkPool = [];
     this.skyDome?.geometry.dispose();
     this.skyMat?.dispose();
     this.rainLines?.geometry.dispose();
+    if (this.rainLines) {
+      (this.rainLines.material as THREE.Material).dispose();
+    }
     this.contactShadowTex?.dispose();
     this.facadeTex?.dispose();
     this.lampPoolTex?.dispose();

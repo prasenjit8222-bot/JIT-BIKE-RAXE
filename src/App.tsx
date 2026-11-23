@@ -437,10 +437,11 @@ export default function App() {
     engineRef.current?.setGarageSelection(selectedBike, selectedTrack, custom);
   }, [profile, selectedBike, selectedTrack]);
 
-  // Sync optional toggleable Auto-Gas with engine
+  // Sync optional toggleable Auto-Gas & mobile touch tuning with engine
   useEffect(() => {
     engineRef.current?.setAutoAccelerate(autoGas);
-  }, [autoGas, engineReady]);
+    engineRef.current?.setTouchMode(touchEnabled);
+  }, [autoGas, touchEnabled, engineReady]);
 
   // Keyboard Controls during Race (mutate controlsRef directly for zero stale closures)
   useEffect(() => {

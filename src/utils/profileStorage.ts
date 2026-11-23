@@ -429,7 +429,7 @@ const SEED_LEADERBOARD: LeaderboardEntry[] = [
     name: 'Aarav Sharma',
     avatar: getAiAvatar(0),
     wins: 24,
-    bestRaceTimeMs: 248400, // 04:08.40
+    bestRaceTimeMs: 166400, // 02:46.40
     bestEndlessMeters: 14820,
     topSpeedKmh: 342,
   },
@@ -438,7 +438,7 @@ const SEED_LEADERBOARD: LeaderboardEntry[] = [
     name: 'Kaito Takahashi',
     avatar: getAiAvatar(1),
     wins: 19,
-    bestRaceTimeMs: 254150, // 04:14.15
+    bestRaceTimeMs: 171150, // 02:51.15
     bestEndlessMeters: 12450,
     topSpeedKmh: 336,
   },
@@ -447,7 +447,7 @@ const SEED_LEADERBOARD: LeaderboardEntry[] = [
     name: 'Elena Vance',
     avatar: getAiAvatar(2),
     wins: 16,
-    bestRaceTimeMs: 261900, // 04:21.90
+    bestRaceTimeMs: 176900, // 02:56.90
     bestEndlessMeters: 10940,
     topSpeedKmh: 328,
   },
@@ -456,7 +456,7 @@ const SEED_LEADERBOARD: LeaderboardEntry[] = [
     name: 'Rohan Verma',
     avatar: getAiAvatar(3),
     wins: 13,
-    bestRaceTimeMs: 268320, // 04:28.32
+    bestRaceTimeMs: 181320, // 03:01.32
     bestEndlessMeters: 9600,
     topSpeedKmh: 322,
   },
@@ -465,7 +465,7 @@ const SEED_LEADERBOARD: LeaderboardEntry[] = [
     name: 'Sora Lindqvist',
     avatar: getAiAvatar(4),
     wins: 11,
-    bestRaceTimeMs: 274600, // 04:34.60
+    bestRaceTimeMs: 186600, // 03:06.60
     bestEndlessMeters: 8420,
     topSpeedKmh: 315,
   },
@@ -474,7 +474,7 @@ const SEED_LEADERBOARD: LeaderboardEntry[] = [
     name: 'Marcus Cole',
     avatar: getAiAvatar(5),
     wins: 8,
-    bestRaceTimeMs: 282100, // 04:42.10
+    bestRaceTimeMs: 192100, // 03:12.10
     bestEndlessMeters: 7350,
     topSpeedKmh: 309,
   },
